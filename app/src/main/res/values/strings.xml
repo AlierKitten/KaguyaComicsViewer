@@ -1,0 +1,54 @@
+<resources>
+    <string name="app_name">Kaguya 漫画</string>
+    <string name="tab_library">漫画库</string>
+    <string name="tab_sources">文件源</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="empty_library">还没有漫画，去添加一个文件源吧</string>
+    <string name="empty_sources">没有可用的文件源</string>
+    <string name="add_source">添加文件源</string>
+    <string name="add_local_source">选择本地文件夹</string>
+    <string name="add_smb_source">添加 SMB 远程源</string>
+    <string name="scan_now">立即扫描</string>
+    <string name="scanning">扫描中…</string>
+    <string name="last_scan">上次扫描：%1$s</string>
+    <string name="never_scanned">尚未扫描</string>
+
+    <string name="source_name">名称</string>
+    <string name="source_host">主机</string>
+    <string name="source_share">共享名</string>
+    <string name="source_path">路径</string>
+    <string name="source_username">用户名</string>
+    <string name="source_password">密码</string>
+    <string name="source_domain">域（可选）</string>
+    <string name="source_port">端口</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+    <string name="test_connection">测试连接</string>
+
+    <string name="downloading">下载中</string>
+    <string name="extracting">解压中</string>
+    <string name="ready_to_read">可阅读</string>
+    <string name="pending">待处理</string>
+    <string name="failed">失败</string>
+    <string name="retry">重试</string>
+    <string name="cancel_download">取消下载</string>
+    <string name="clear_cache">清理缓存</string>
+    <string name="clear_cache_comic">清理此漫画缓存</string>
+    <string name="continue_reading">继续阅读</string>
+    <string name="recent">最近阅读</string>
+    <string name="all">全部</string>
+
+    <string name="page_indicator">第 %1$d / %2$d 页</string>
+    <string name="reading_mode">阅读模式</string>
+    <string name="mode_paged">左右翻页</string>
+    <string name="mode_continuous">上下滚动</string>
+    <string name="mode_webtoon">条带滚动</string>
+
+    <string name="permission_required">需要通知权限以显示下载进度</string>
+    <string name="ok">确定</string>
+
+    <string name="cache_size">缓存：%1$s</string>
+    <string name="free_space">剩余空间：%1$s</string>
+</resources>
