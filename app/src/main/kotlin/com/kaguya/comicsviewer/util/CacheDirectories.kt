@@ -27,7 +27,11 @@ class CacheDirectories @Inject constructor(
     val covers: File
         get() = File(root, "covers").apply { if (!exists()) mkdirs() }
 
-    fun archiveFile(comicId: Long): File = File(archives, "comic_$comicId.archive")
+    fun archiveFile(comicId: Long, originalName: String? = null): File {
+        val ext = originalName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
+        val suffix = if (ext != null) ".$ext" else ".archive"
+        return File(archives, "comic_$comicId$suffix")
+    }
     fun extractedDir(comicId: Long): File = File(extracted, "comic_$comicId")
     fun coverFile(comicId: Long): File = File(covers, "comic_$comicId.jpg")
 

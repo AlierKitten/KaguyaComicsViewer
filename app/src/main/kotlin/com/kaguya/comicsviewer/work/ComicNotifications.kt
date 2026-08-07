@@ -33,7 +33,7 @@ class ComicNotifications @Inject constructor(
         }
         val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("下载：$title")
+            .setContentTitle("加载：$title")
             .setContentText(text)
             .setProgress(100, progress.coerceIn(0, 100), totalBytes <= 0)
             .setOnlyAlertOnce(true)
@@ -55,7 +55,7 @@ class ComicNotifications @Inject constructor(
         val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("已就绪：$title")
-            .setContentText("可以开始阅读")
+            .setContentText("点击即可开始阅读")
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
@@ -66,7 +66,7 @@ class ComicNotifications @Inject constructor(
         val nm: NotificationManager = context.getSystemService() ?: return
         val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle("下载失败：$title")
+            .setContentTitle("加载失败：$title")
             .setContentText(error?.take(120) ?: "未知错误")
             .setAutoCancel(true)
             .build()

@@ -1,11 +1,10 @@
 package com.kaguya.comicsviewer.work
 
 import android.content.Context
-import android.content.pm.ServiceInfo
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.kaguya.comicsviewer.data.repository.ComicRepository
@@ -31,55 +30,66 @@ class DownloadComicWorker @AssistedInject constructor(
     private val notifications: ComicNotifications
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun getForegroundInfo(): ForegroundInfo {
-        val title = inputData.getString("title") ?: "下载中"
-        return ForegroundInfo(
-            PROGRESS_NOTIF_ID,
-            androidx.core.app.NotificationCompat.Builder(
-                applicationContext,
-                com.kaguya.comicsviewer.notification.NotificationChannels.CHANNEL_DOWNLOAD
-            )
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("下载：$title")
-                .setOngoing(true)
-                .setProgress(100, 0, true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                .build(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-        )
+    companion object {
+        private const val TAG = "DownloadComicWorker"
     }
 
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    override suspend fun doWork(): Result {
         val comicId = inputData.getLong(WorkParams.COMIC_ID, -1)
         val sourceId = inputData.getLong(WorkParams.SOURCE_ID, -1)
-        if (comicId <= 0 || sourceId <= 0) return@withContext Result.failure()
+        Log.d(TAG, "doWork started: comicId=$comicId, sourceId=$sourceId")
+        if (comicId <= 0 || sourceId <= 0) {
+            Log.e(TAG, "doWork: invalid comicId or sourceId")
+            return Result.failure()
+        }
 
         val realSource = repository.listEnabledSources().firstOrNull { it.id == sourceId }
-            ?: return@withContext Result.failure()
+        if (realSource == null) {
+            Log.e(TAG, "doWork: source not found for id=$sourceId")
+            return Result.failure()
+        }
         val title = inputData.getString("title") ?: realSource.name
+        Log.d(TAG, "doWork: title='$title', type=${realSource.type}, localUri=${realSource.localUri}")
 
-        runCatching { setForeground(getForegroundInfo()) }
-        setProgressAsync(workDataOf(WorkParams.PROGRESS to 0))
-
-        val outFile = cacheDirs.archiveFile(comicId)
+        val outFile = cacheDirs.archiveFile(comicId, inputData.getString(WorkParams.REMOTE_PATH))
         if (outFile.exists()) outFile.delete()
         outFile.parentFile?.mkdirs()
+        Log.d(TAG, "doWork: output file = ${outFile.absolutePath}")
 
-        try {
+        return try {
             when (realSource.type) {
                 ComicSourceType.LOCAL -> {
-                    val localPath = inputData.getString(WorkParams.REMOTE_PATH) ?: error("local path missing")
+                    val localPath = inputData.getString(WorkParams.REMOTE_PATH)
+                    if (localPath.isNullOrBlank()) {
+                        Log.e(TAG, "doWork: localPath is null or blank")
+                        return Result.failure()
+                    }
+                    Log.d(TAG, "doWork: localPath='$localPath', treeUri='${realSource.localUri}'")
                     val treeUri = android.net.Uri.parse(realSource.localUri)
                     val df = DocumentFile.fromTreeUri(applicationContext, treeUri)
-                        ?: error("cannot open tree uri")
-                    val file = findFile(df, localPath) ?: error("file not found: $localPath")
-                    copyFromSaf(file.uri, outFile)
+                    if (df == null) {
+                        Log.e(TAG, "doWork: cannot open tree uri: ${realSource.localUri}")
+                        throw IllegalStateException("无法访问本地文件夹，请重新添加文件源")
+                    }
+                    Log.d(TAG, "doWork: DocumentFile root uri=${df.uri}, name=${df.name}")
+                    val file = findFile(df, localPath)
+                    if (file == null) {
+                        Log.e(TAG, "doWork: file not found in SAF: $localPath")
+                        throw IllegalStateException("找不到文件: $localPath")
+                    }
+                    Log.d(TAG, "doWork: found file, uri=${file.uri}, size=${file.length()}")
+                    withContext(Dispatchers.IO) { copyFromSaf(file.uri, outFile) }
                 }
                 ComicSourceType.SMB -> {
-                    val remote = inputData.getString(WorkParams.REMOTE_PATH) ?: error("remote path missing")
-                    downloadFromSmb(realSource, remote, outFile, title)
+                    val remote = inputData.getString(WorkParams.REMOTE_PATH)
+                    if (remote.isNullOrBlank()) {
+                        Log.e(TAG, "doWork: remote path is null or blank")
+                        return Result.failure()
+                    }
+                    withContext(Dispatchers.IO) { downloadFromSmb(realSource, remote, outFile, title) }
                 }
             }
+            Log.d(TAG, "doWork: download complete, file size=${outFile.length()}")
             repository.upsertCache(
                 ComicCache(
                     comicId = comicId,
@@ -92,8 +102,10 @@ class DownloadComicWorker @AssistedInject constructor(
                 )
             )
             setProgressAsync(workDataOf(WorkParams.PROGRESS to 100))
+            Log.d(TAG, "doWork: success")
             Result.success(workDataOf("archivePath" to outFile.absolutePath))
         } catch (e: Exception) {
+            Log.e(TAG, "doWork: failed", e)
             notifications.showFailed(comicId, title, e.message)
             repository.upsertCache(
                 ComicCache(
@@ -195,7 +207,4 @@ class DownloadComicWorker @AssistedInject constructor(
         return cur
     }
 
-    companion object {
-        const val PROGRESS_NOTIF_ID = 1001
-    }
 }

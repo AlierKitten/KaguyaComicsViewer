@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.library
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -118,6 +119,14 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun download(comicId: Long) {
-        viewModelScope.launch { downloadUseCase(comicId) }
+        Log.d("LibraryViewModel", "download called: comicId=$comicId")
+        viewModelScope.launch {
+            try {
+                downloadUseCase(comicId)
+                Log.d("LibraryViewModel", "download completed: comicId=$comicId")
+            } catch (e: Exception) {
+                Log.e("LibraryViewModel", "download failed: comicId=$comicId", e)
+            }
+        }
     }
 }

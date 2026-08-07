@@ -33,11 +33,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +58,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.util.FormatUtils
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,6 +68,9 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -74,7 +82,8 @@ fun LibraryScreen(
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             OutlinedTextField(
@@ -97,7 +106,22 @@ fun LibraryScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(state.recent, key = { it.comic.id }) { row ->
-                        RecentItem(row) { viewModel.download(row.comic.id); nav.navigate("reader/${row.comic.id}") }
+                        RecentItem(row) {
+                            when (row.cache?.state) {
+                                CacheState.READY -> nav.navigate("reader/${row.comic.id}")
+                                CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
+                                    scope.launch { snackbarHostState.showSnackbar("加载中，请稍候...") }
+                                }
+                                CacheState.FAILED -> {
+                                    viewModel.download(row.comic.id)
+                                    scope.launch { snackbarHostState.showSnackbar("重新加载") }
+                                }
+                                CacheState.PENDING, CacheState.DOWNLOADED, null -> {
+                                    viewModel.download(row.comic.id)
+                                    scope.launch { snackbarHostState.showSnackbar("开始加载「${row.comic.title}」") }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -116,7 +140,17 @@ fun LibraryScreen(
                         ComicGridItem(row, onClick = {
                             when (row.cache?.state) {
                                 CacheState.READY -> nav.navigate("reader/${row.comic.id}")
-                                else -> viewModel.download(row.comic.id)
+                                CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
+                                    scope.launch { snackbarHostState.showSnackbar("加载中，请稍候...") }
+                                }
+                                CacheState.FAILED -> {
+                                    viewModel.download(row.comic.id)
+                                    scope.launch { snackbarHostState.showSnackbar("重新加载") }
+                                }
+                                CacheState.PENDING, CacheState.DOWNLOADED, null -> {
+                                    viewModel.download(row.comic.id)
+                                    scope.launch { snackbarHostState.showSnackbar("开始加载「${row.comic.title}」") }
+                                }
                             }
                         })
                     }

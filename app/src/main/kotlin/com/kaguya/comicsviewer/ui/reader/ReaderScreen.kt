@@ -21,8 +21,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -77,20 +79,27 @@ fun ReaderScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        when (state.mode) {
-            ReadingMode.PAGED -> PagedReader(
-                state = state,
-                onPageChange = viewModel::goTo,
-                onTap = { showOverlay = !showOverlay }
-            )
-            ReadingMode.CONTINUOUS, ReadingMode.WEBTOON -> ContinuousReader(
-                state = state,
-                onPageChange = viewModel::goTo,
-                onTap = { showOverlay = !showOverlay }
-            )
+        when {
+            state.isLoading -> LoadingState()
+            state.error != null -> ErrorState(error = state.error!!, onRetry = viewModel::retry, onBack = onBack)
+            state.pages.isEmpty() -> EmptyState()
+            else -> {
+                when (state.mode) {
+                    ReadingMode.PAGED -> PagedReader(
+                        state = state,
+                        onPageChange = viewModel::goTo,
+                        onTap = { showOverlay = !showOverlay }
+                    )
+                    ReadingMode.CONTINUOUS, ReadingMode.WEBTOON -> ContinuousReader(
+                        state = state,
+                        onPageChange = viewModel::goTo,
+                        onTap = { showOverlay = !showOverlay }
+                    )
+                }
+            }
         }
 
-        if (showOverlay) {
+        if (showOverlay && state.pages.isNotEmpty() && !state.isLoading) {
             ReaderTopBar(
                 title = state.comic?.title.orEmpty(),
                 page = state.page + 1,
@@ -197,6 +206,40 @@ private fun EmptyState() {
 }
 
 @Composable
+private fun LoadingState() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(40.dp))
+            Spacer(Modifier.size(12.dp))
+            Text("加载中...", color = Color.White.copy(alpha = 0.7f))
+        }
+    }
+}
+
+@Composable
+private fun ErrorState(error: String, onRetry: () -> Unit, onBack: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("加载失败", color = Color.White, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.size(8.dp))
+            Text(error, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.size(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onBack,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f))
+                ) {
+                    Text("返回", color = Color.White)
+                }
+                Button(onClick = onRetry) {
+                    Text("重试")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ReaderTopBar(
     title: String,
     page: Int,
@@ -216,7 +259,7 @@ private fun ReaderTopBar(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Outlined.ArrowBack, null, tint = Color.White)
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, tint = Color.White)
                 }
                 Text(
                     title,

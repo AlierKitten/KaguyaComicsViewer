@@ -1,23 +1,18 @@
 package com.kaguya.comicsviewer.work
 
 import android.content.Context
-import android.content.pm.ServiceInfo
-import androidx.core.app.NotificationCompat
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.ComicCache
-import com.kaguya.comicsviewer.notification.NotificationChannels
 import com.kaguya.comicsviewer.util.CacheDirectories
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -33,37 +28,31 @@ class ExtractComicWorker @AssistedInject constructor(
     private val notifications: ComicNotifications
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun getForegroundInfo(): ForegroundInfo {
-        val title = inputData.getString("title") ?: "解压中"
-        return ForegroundInfo(
-            1002,
-            NotificationCompat.Builder(
-                applicationContext,
-                NotificationChannels.CHANNEL_DOWNLOAD
-            )
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("解压：$title")
-                .setOngoing(true)
-                .setProgress(100, 0, true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .build(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-        )
+    companion object {
+        private const val TAG = "ExtractComicWorker"
     }
 
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    override suspend fun doWork(): Result {
         val comicId = inputData.getLong(WorkParams.COMIC_ID, -1)
-        val archivePath = inputData.getString("archivePath") ?: return@withContext Result.failure()
+        val archivePath = inputData.getString("archivePath")
+        if (archivePath.isNullOrBlank()) {
+            Log.e(TAG, "doWork: archivePath is null")
+            return Result.failure()
+        }
         val title = repository.findComic(comicId)?.title ?: inputData.getString("title") ?: ""
-
-        runCatching { setForeground(getForegroundInfo()) }
+        Log.d(TAG, "doWork started: comicId=$comicId, title='$title', archivePath='$archivePath'")
 
         val archive = File(archivePath)
-        if (!archive.isFile) return@withContext Result.failure(workDataOf(WorkParams.ERROR to "archive missing"))
+        if (!archive.isFile) {
+            Log.e(TAG, "doWork: archive file not found: $archivePath")
+            return Result.failure(workDataOf(WorkParams.ERROR to "archive missing"))
+        }
+        Log.d(TAG, "doWork: archive size=${archive.length()}")
 
         val target = cacheDirs.extractedDir(comicId)
         if (target.exists()) target.deleteRecursively()
         target.mkdirs()
+        Log.d(TAG, "doWork: target dir=${target.absolutePath}")
 
         // 标记为解压中
         repository.upsertCache(
@@ -78,24 +67,30 @@ class ExtractComicWorker @AssistedInject constructor(
             )
         )
 
-        val count = runCatching { extractor.extractImages(archive, target) }
-            .onFailure { e ->
-                notifications.showFailed(comicId, title, e.message)
-                repository.upsertCache(
-                    ComicCache(
-                        comicId = comicId,
-                        state = CacheState.FAILED,
-                        archiveFile = archivePath,
-                        extractedDir = null,
-                        totalBytes = archive.length(),
-                        downloadedBytes = archive.length(),
-                        lastError = e.message
-                    )
+        val extractResult = runCatching { extractor.extractImages(archive, target) }
+        if (extractResult.isFailure) {
+            val e = extractResult.exceptionOrNull()!!
+            Log.e(TAG, "doWork: extract failed", e)
+            notifications.showFailed(comicId, title, e.message)
+            repository.upsertCache(
+                ComicCache(
+                    comicId = comicId,
+                    state = CacheState.FAILED,
+                    archiveFile = archivePath,
+                    extractedDir = null,
+                    totalBytes = archive.length(),
+                    downloadedBytes = archive.length(),
+                    lastError = e.message
                 )
-                return@withContext Result.failure()
-            }.getOrDefault(0)
+            )
+            return Result.failure()
+        }
+        val count = extractResult.getOrDefault(0)
+
+        Log.d(TAG, "doWork: extracted $count images")
 
         if (count == 0) {
+            Log.w(TAG, "doWork: no images found in archive")
             notifications.showFailed(comicId, title, "未找到可读取的图片")
             repository.upsertCache(
                 ComicCache(
@@ -108,13 +103,14 @@ class ExtractComicWorker @AssistedInject constructor(
                     lastError = "no images"
                 )
             )
-            return@withContext Result.failure()
+            return Result.failure()
         }
 
         // 生成封面
         val coverFile = cacheDirs.coverFile(comicId)
         runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
             coverFile.writeBytes(bytes)
+            Log.d(TAG, "doWork: cover written, size=${bytes.size}")
         }
 
         // 标记为就绪
@@ -130,6 +126,7 @@ class ExtractComicWorker @AssistedInject constructor(
             )
         )
         notifications.showReady(comicId, title)
-        Result.success(workDataOf("extractedDir" to target.absolutePath, "pageCount" to count))
+        Log.d(TAG, "doWork: success, pages=$count")
+        return Result.success(workDataOf("extractedDir" to target.absolutePath, "pageCount" to count))
     }
 }

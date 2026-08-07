@@ -1,7 +1,9 @@
 package com.kaguya.comicsviewer.work
 
 import android.content.Context
+import android.util.Log
 import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -17,20 +19,28 @@ import javax.inject.Singleton
 class ComicWorkScheduler @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    companion object {
+        private const val TAG = "ComicWorkScheduler"
+    }
+
     fun scheduleDownloadAndExtract(comic: Comic, source: ComicSource) {
+        Log.d(TAG, "scheduleDownloadAndExtract: comicId=${comic.id}, title='${comic.title}', sourceId=${source.id}, type=${source.type}")
         val downloadInput = workDataOf(
             WorkParams.COMIC_ID to comic.id,
             WorkParams.SOURCE_ID to source.id,
             WorkParams.REMOTE_PATH to comic.filePath,
             "title" to comic.title
         )
+        Log.d(TAG, "downloadInput: comicId=${comic.id}, sourceId=${source.id}, remotePath='${comic.filePath}'")
+
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(if (source.host != null) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED)
+            .setRequiresStorageNotLow(true)
+            .build()
+        Log.d(TAG, "constraints: networkType=${if (source.host != null) "CONNECTED" else "NOT_REQUIRED"}")
+
         val download = OneTimeWorkRequestBuilder<DownloadComicWorker>()
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(if (source.host != null) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED)
-                    .setRequiresStorageNotLow(true)
-                    .build()
-            )
+            .setConstraints(constraints)
             .setInputData(downloadInput)
             .addTag(tagFor(comic.id))
             .build()
@@ -46,9 +56,10 @@ class ComicWorkScheduler @Inject constructor(
             .build()
 
         WorkManager.getInstance(context)
-            .beginWith(download)
+            .beginUniqueWork(workName(comic.id), ExistingWorkPolicy.REPLACE, download)
             .then(extract)
             .enqueue()
+        Log.d(TAG, "WorkManager chain enqueued: download->extract for comicId=${comic.id}")
     }
 
     fun cancel(comicId: Long) {

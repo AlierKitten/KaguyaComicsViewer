@@ -1,6 +1,7 @@
 package com.kaguya.comicsviewer
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -18,9 +19,11 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.d("MainActivity", "onCreate started")
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Log.d("MainActivity", "setting content")
         setContent {
             KaguyaTheme {
                 CompositionLocalProvider(LocalSpacing provides Spacing()) {
@@ -30,5 +33,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        Log.d("MainActivity", "onCreate done")
     }
 }
