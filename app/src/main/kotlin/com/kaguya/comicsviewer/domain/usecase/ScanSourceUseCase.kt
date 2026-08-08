@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.domain.usecase
 
+import android.util.Log
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.LocalFileScanner
 import com.kaguya.comicsviewer.data.source.SmbFileScanner
@@ -14,12 +15,23 @@ class ScanSourceUseCase @Inject constructor(
     private val localScanner: LocalFileScanner,
     private val smbScanner: SmbFileScanner
 ) {
+    companion object {
+        private const val TAG = "ScanSourceUseCase"
+    }
+
     suspend operator fun invoke(source: ComicSource): Int {
+        Log.d(TAG, "scan start: source='${source.name}', type=${source.type}, host=${source.host}, share=${source.share}, path=${source.path}")
         val scanner = when (source.type) {
             ComicSourceType.LOCAL -> localScanner
             ComicSourceType.SMB -> smbScanner
         }
-        val found = scanner.scan(source)
+        val found = try {
+            scanner.scan(source)
+        } catch (e: Exception) {
+            Log.e(TAG, "scan failed for source '${source.name}'", e)
+            return 0
+        }
+        Log.d(TAG, "scan found ${found.size} comics for source '${source.name}'")
         val now = System.currentTimeMillis()
 
         val existing = repository.listComicsBySources(listOf(source.id))
@@ -47,6 +59,7 @@ class ScanSourceUseCase @Inject constructor(
         // 删除不在 found 内的
         repository.removeComicsNotIn(source.id, keepIds)
         repository.markSourceScanned(source.id, now)
+        Log.d(TAG, "scan complete for source '${source.name}': upserted=${found.size}, total kept=${keepIds.size}")
         return found.size
     }
 }

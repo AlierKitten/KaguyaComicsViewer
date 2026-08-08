@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.library
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +70,14 @@ fun LibraryScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val loadingProgress by viewModel.loadingProgress.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    // Toast 事件监听
+    LaunchedEffect(Unit) {
+        viewModel.toastEvents.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
 
     // 当加载完成(READY)时自动跳转阅读器，不弹 dialog
     LaunchedEffect(loadingProgress?.state) {

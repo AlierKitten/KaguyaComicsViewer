@@ -14,7 +14,7 @@ room = "2.6.1"
 workManager = "2.10.0"
 coil = "2.7.0"
 datastore = "1.1.1"
-smbj = "0.11.5"
+jcifsng = "2.1.10"
 commonsCompress = "1.26.2"
 junrar = "7.5.5"
 coroutines = "1.8.1"
@@ -65,9 +65,8 @@ coil-svg = { group = "io.coil-kt", name = "coil-svg", version.ref = "coil" }
 # DataStore
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
-# SMB (SMB2/3)
-smbj = { group = "com.hierynomus", name = "smbj", version.ref = "smbj" }
-sshd = { group = "org.apache.sshd", name = "sshd-common", version = "2.13.1" }
+# SMB (jcifs-ng)
+jcifsng = { group = "eu.agno3.jcifs", name = "jcifs-ng", version.ref = "jcifsng" }
 
 # Archives
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
@@ -76,9 +75,6 @@ junrar = { group = "com.github.junrar", name = "junrar", version.ref = "junrar" 
 
 # Coroutines
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
-
-# Logging
-slf4j-android = { group = "uk.uuid.slf4j", name = "slf4j-android", version = "2.0.7-0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

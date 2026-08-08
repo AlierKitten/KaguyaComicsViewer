@@ -11,9 +11,11 @@ import com.kaguya.comicsviewer.domain.model.ComicCache
 import com.kaguya.comicsviewer.domain.usecase.DownloadComicUseCase
 import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -62,6 +64,10 @@ class LibraryViewModel @Inject constructor(
     // 当前正在加载的漫画进度
     private val _loadingProgress = MutableStateFlow<LoadingProgress?>(null)
     val loadingProgress: StateFlow<LoadingProgress?> = _loadingProgress.asStateFlow()
+
+    // Toast 一次性事件
+    private val _toastEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val toastEvents = _toastEvents.asSharedFlow()
 
     // 用 flatMapLatest + combine 为每个 comic 附加 cache + progress
     private val comicsFlow = sourceIds.flatMapLatest { ids ->
@@ -116,7 +122,19 @@ class LibraryViewModel @Inject constructor(
             scanning.value = true
             try {
                 val sources = repository.listEnabledSources()
-                for (s in sources) scanUseCase(s)
+                var totalFound = 0
+                for (s in sources) {
+                    try {
+                        val count = scanUseCase(s)
+                        totalFound += count
+                    } catch (e: Exception) {
+                        Log.e("LibraryViewModel", "scan failed for ${s.name}", e)
+                        _toastEvents.tryEmit("扫描失败：${s.name} - ${e.message}")
+                    }
+                }
+                if (totalFound == 0 && sources.isNotEmpty()) {
+                    _toastEvents.tryEmit("扫描完成，未发现新漫画")
+                }
             } finally {
                 scanning.value = false
             }
@@ -128,7 +146,16 @@ class LibraryViewModel @Inject constructor(
             scanning.value = true
             try {
                 val sources = repository.listEnabledSources()
-                sources.firstOrNull { it.id == sourceId }?.let { scanUseCase(it) }
+                val source = sources.firstOrNull { it.id == sourceId }
+                if (source != null) {
+                    val count = scanUseCase(source)
+                    if (count == 0) {
+                        _toastEvents.tryEmit("未发现漫画文件")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("LibraryViewModel", "scanSource failed", e)
+                _toastEvents.tryEmit("扫描失败：${e.message}")
             } finally {
                 scanning.value = false
             }
@@ -172,6 +199,7 @@ class LibraryViewModel @Inject constructor(
                     state = CacheState.FAILED,
                     error = e.message
                 )
+                _toastEvents.tryEmit("加载失败：${e.message}")
             }
         }
     }

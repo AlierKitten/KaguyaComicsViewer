@@ -191,47 +191,42 @@ class DownloadComicWorker @AssistedInject constructor(
         title: String
     ) = withContext(Dispatchers.IO) {
         val comicId = inputData.getLong(WorkParams.COMIC_ID, 0)
-        val session = smbClient.open(source)
-        try {
-            val total = runCatching { smbClient.getFileSize(session, remote) }.getOrDefault(-1L)
-            var copied = 0L
-            var lastPercent = -1
-            smbClient.openInput(session, remote).use { input ->
-                FileOutputStream(outFile).use { out ->
-                    val buf = ByteArray(128 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        out.write(buf, 0, n)
-                        copied += n
-                        if (total > 0) {
-                            val percent = ((copied * 100) / total).toInt()
-                            if (percent != lastPercent) {
-                                lastPercent = percent
-                                setProgress(workDataOf(
-                                    WorkParams.PROGRESS to percent,
-                                    WorkParams.DOWNLOADED_BYTES to copied,
-                                    WorkParams.TOTAL_BYTES to total
-                                ))
-                                notifications.showProgress(comicId, title, percent, total, copied)
-                                repository.upsertCache(
-                                    ComicCache(
-                                        comicId = comicId,
-                                        state = CacheState.DOWNLOADING,
-                                        archiveFile = outFile.absolutePath,
-                                        extractedDir = null,
-                                        totalBytes = total,
-                                        downloadedBytes = copied,
-                                        lastError = null
-                                    )
+        val total = runCatching { smbClient.getFileSize(source, remote) }.getOrDefault(-1L)
+        var copied = 0L
+        var lastPercent = -1
+        smbClient.readFile(source, remote) { input ->
+            FileOutputStream(outFile).use { out ->
+                val buf = ByteArray(128 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    out.write(buf, 0, n)
+                    copied += n
+                    if (total > 0) {
+                        val percent = ((copied * 100) / total).toInt()
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            setProgress(workDataOf(
+                                WorkParams.PROGRESS to percent,
+                                WorkParams.DOWNLOADED_BYTES to copied,
+                                WorkParams.TOTAL_BYTES to total
+                            ))
+                            notifications.showProgress(comicId, title, percent, total, copied)
+                            repository.upsertCache(
+                                ComicCache(
+                                    comicId = comicId,
+                                    state = CacheState.DOWNLOADING,
+                                    archiveFile = outFile.absolutePath,
+                                    extractedDir = null,
+                                    totalBytes = total,
+                                    downloadedBytes = copied,
+                                    lastError = null
                                 )
-                            }
+                            )
                         }
                     }
                 }
             }
-        } finally {
-            session.close()
         }
     }
 
