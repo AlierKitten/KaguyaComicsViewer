@@ -129,10 +129,10 @@ fun SettingsScreen(
 
             SectionCard(title = "存储", icon = Icons.Outlined.CleaningServices) {
                 ToggleRow(
-                    title = "自动生成封面",
-                    subtitle = "加载漫画时自动提取第一页生成缩略图封面",
-                    checked = state.settings.enableCoverGeneration,
-                    onChange = viewModel::setEnableCoverGeneration
+                    title = "显示封面",
+                    subtitle = "在漫画库中显示封面缩略图，关闭后显示默认图标",
+                    checked = state.settings.showCovers,
+                    onChange = viewModel::setShowCovers
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("缓存：${state.cacheSize}", style = MaterialTheme.typography.bodyMedium)
@@ -165,15 +165,15 @@ fun SettingsScreen(
                     onClick = { showClearCoversDialog = true },
                     enabled = !state.isClearingCovers,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
                     )
                 ) {
                     if (state.isClearingCovers) {
                         CircularProgressIndicator(
                             strokeWidth = 2.dp,
                             modifier = Modifier.size(18.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Spacer(Modifier.width(8.dp))
                     } else {

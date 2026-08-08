@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -35,7 +34,8 @@ data class LibraryUiState(
     val comics: List<ComicRow> = emptyList(),
     val recent: List<ComicRow> = emptyList(),
     val query: String = "",
-    val displayMode: LibraryDisplayMode = LibraryDisplayMode.GRID
+    val displayMode: LibraryDisplayMode = LibraryDisplayMode.GRID,
+    val showCovers: Boolean = true
 )
 
 data class ComicRow(
@@ -67,16 +67,15 @@ class LibraryViewModel @Inject constructor(
     private val query = MutableStateFlow("")
     private val scanning = MutableStateFlow(false)
     private val displayMode = MutableStateFlow(LibraryDisplayMode.GRID)
+    private val showCovers = MutableStateFlow(true)
 
     init {
-        // 仅监听显示模式变化
+        // 监听设置变化
         viewModelScope.launch {
-            settings.settings
-                .map { it.libraryDisplayMode }
-                .distinctUntilChanged()
-                .collect { mode ->
-                    displayMode.value = LibraryDisplayMode.entries[mode]
-                }
+            settings.settings.collect { s ->
+                displayMode.value = LibraryDisplayMode.entries[s.libraryDisplayMode]
+                showCovers.value = s.showCovers
+            }
         }
     }
     private val sourceIds = repository.observeSources().map { srcs -> srcs.filter { it.enabled }.map { it.id } }
@@ -131,9 +130,12 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    // displayMode + showCovers 合并为一个 Flow，避免 combine 超过 5 个参数
+    private val displayPrefs = combine(displayMode, showCovers) { dm, scv -> dm to scv }
+
     val state: StateFlow<LibraryUiState> = combine(
-        comicsFlow, recentFlow, query, scanning, displayMode
-    ) { comics, recent, q, sc, dm ->
+        comicsFlow, recentFlow, query, scanning, displayPrefs
+    ) { comics, recent, q, sc, (dm, scv) ->
         val filtered = if (q.isBlank()) comics else {
             val keywords = q.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
             if (keywords.isEmpty()) comics
@@ -141,7 +143,7 @@ class LibraryViewModel @Inject constructor(
                 keywords.all { keyword -> row.comic.title.contains(keyword, ignoreCase = true) }
             }
         }
-        LibraryUiState(isScanning = sc, comics = filtered, recent = recent, query = q, displayMode = dm)
+        LibraryUiState(isScanning = sc, comics = filtered, recent = recent, query = q, displayMode = dm, showCovers = scv)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryUiState())
 
     fun setQuery(q: String) {

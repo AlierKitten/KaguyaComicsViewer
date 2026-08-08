@@ -8,7 +8,6 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import com.kaguya.comicsviewer.data.prefs.SettingsRepository
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.CacheState
@@ -18,7 +17,6 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
 import java.io.FileOutputStream
-import kotlinx.coroutines.flow.first
 
 /**
  * 解压 Worker：解压下载好的压缩包到缓存目录，并写封面。
@@ -30,8 +28,7 @@ class ExtractComicWorker @AssistedInject constructor(
     private val repository: ComicRepository,
     private val extractor: ArchiveExtractor,
     private val cacheDirs: CacheDirectories,
-    private val notifications: ComicNotifications,
-    private val settings: SettingsRepository
+    private val notifications: ComicNotifications
 ) : CoroutineWorker(appContext, params) {
 
     companion object {
@@ -112,29 +109,24 @@ class ExtractComicWorker @AssistedInject constructor(
             return Result.failure()
         }
 
-        // 生成封面缩略图（根据设置）
-        val enableCover = runCatching { settings.settings.first().enableCoverGeneration }.getOrDefault(true)
+        // 生成封面缩略图
+        val coverFile = cacheDirs.coverFile(comicId)
         var coverPath: String? = null
-        if (enableCover) {
-            val coverFile = cacheDirs.coverFile(comicId)
-            // 优先从解压目录生成封面
-            val firstImage = target.listFiles()?.filter { it.isImageFile() }?.sortedBy { it.name }?.firstOrNull()
-            if (firstImage != null) {
-                runCatching { firstImage.readBytes() }.getOrNull()?.let { bytes ->
-                    generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
-                    coverPath = coverFile.absolutePath
-                    Log.d(TAG, "doWork: cover thumbnail written from extracted, size=${coverFile.length()}")
-                }
-            } else {
-                // 回退：从压缩包读取
-                runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
-                    generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
-                    coverPath = coverFile.absolutePath
-                    Log.d(TAG, "doWork: cover thumbnail written from archive, size=${coverFile.length()}")
-                }
+        // 优先从解压目录生成封面
+        val firstImage = target.listFiles()?.filter { it.isImageFile() }?.sortedBy { it.name }?.firstOrNull()
+        if (firstImage != null) {
+            runCatching { firstImage.readBytes() }.getOrNull()?.let { bytes ->
+                generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
+                coverPath = coverFile.absolutePath
+                Log.d(TAG, "doWork: cover thumbnail written from extracted, size=${coverFile.length()}")
             }
         } else {
-            Log.d(TAG, "doWork: cover generation disabled, skipping")
+            // 回退：从压缩包读取
+            runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
+                generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
+                coverPath = coverFile.absolutePath
+                Log.d(TAG, "doWork: cover thumbnail written from archive, size=${coverFile.length()}")
+            }
         }
 
         // 记录总页数

@@ -92,6 +92,9 @@ interface ComicDao {
     @Query("DELETE FROM comic_cache WHERE comic_id = :comicId")
     suspend fun deleteCache(comicId: Long)
 
+    @Query("UPDATE comics SET cover_path = NULL")
+    suspend fun clearAllCoverPaths()
+
     @Query("SELECT * FROM reading_progress WHERE comic_id = :comicId")
     suspend fun findProgress(comicId: Long): ReadingProgressEntity?
 

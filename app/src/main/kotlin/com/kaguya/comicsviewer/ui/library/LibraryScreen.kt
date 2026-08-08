@@ -157,7 +157,7 @@ fun LibraryScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(state.comics, key = { it.comic.id }) { row ->
-                        ComicGridItem(row, onClick = {
+                        ComicGridItem(row, showCover = state.showCovers, onClick = {
                             handleComicClick(row, nav, viewModel)
                         })
                     }
@@ -169,7 +169,7 @@ fun LibraryScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(state.comics, key = { it.comic.id }) { row ->
-                        ComicListItem(row, onClick = {
+                        ComicListItem(row, showCover = state.showCovers, onClick = {
                             handleComicClick(row, nav, viewModel)
                         })
                     }
@@ -282,7 +282,7 @@ private fun EmptyLibrary() {
 }
 
 @Composable
-private fun ComicGridItem(row: ComicRow, onClick: () -> Unit) {
+private fun ComicGridItem(row: ComicRow, showCover: Boolean, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
@@ -296,7 +296,7 @@ private fun ComicGridItem(row: ComicRow, onClick: () -> Unit) {
             ) {
                 SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(row.comic.coverPath?.let { File(it) })
+                        .data(if (showCover) row.comic.coverPath?.let { File(it) } else null)
                         .crossfade(true)
                         .build(),
                     contentDescription = null,
@@ -365,7 +365,7 @@ private fun ComicGridItem(row: ComicRow, onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ComicListItem(row: ComicRow, onClick: () -> Unit) {
+private fun ComicListItem(row: ComicRow, showCover: Boolean, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
@@ -381,7 +381,7 @@ private fun ComicListItem(row: ComicRow, onClick: () -> Unit) {
             ) {
                 SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(row.comic.coverPath?.let { File(it) })
+                        .data(if (showCover) row.comic.coverPath?.let { File(it) } else null)
                         .crossfade(true)
                         .build(),
                     contentDescription = null,

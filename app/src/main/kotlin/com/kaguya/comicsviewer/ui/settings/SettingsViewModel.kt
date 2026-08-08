@@ -69,7 +69,7 @@ class SettingsViewModel @Inject constructor(
     }
     fun setDarkMode(enabled: Boolean) = viewModelScope.launch { settings.setDarkMode(enabled) }
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { settings.setDynamicColor(enabled) }
-    fun setEnableCoverGeneration(enabled: Boolean) = viewModelScope.launch { settings.setEnableCoverGeneration(enabled) }
+    fun setShowCovers(enabled: Boolean) = viewModelScope.launch { settings.setShowCovers(enabled) }
 
     fun clearAllCache() {
         viewModelScope.launch {
@@ -113,8 +113,7 @@ class SettingsViewModel @Inject constructor(
                 withContext(Dispatchers.IO) {
                     cacheDirs.clearCovers()
                     // 清除数据库中的封面路径
-                    val comics = repository.listAllCaches()
-                    // 注意：封面路径存储在 Comic 表中，需要单独清除
+                    repository.clearAllCoverPaths()
                 }
                 tick.value = System.currentTimeMillis()
                 Log.d("SettingsVM", "all covers cleared")

@@ -42,4 +42,6 @@ interface ComicRepository {
     suspend fun updatePageCount(comicId: Long, count: Int)
 
     suspend fun clearAllProgress()
+
+    suspend fun clearAllCoverPaths()
 }

@@ -136,6 +136,10 @@ class ComicRepositoryImpl @Inject constructor(
         comicDao.clearAllProgress()
     }
 
+    override suspend fun clearAllCoverPaths() {
+        comicDao.clearAllCoverPaths()
+    }
+
     private fun java.io.File.isImageFile(): Boolean {
         val n = name.lowercase()
         return n.endsWith(".jpg") || n.endsWith(".jpeg") ||

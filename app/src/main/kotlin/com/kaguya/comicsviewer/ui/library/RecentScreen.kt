@@ -131,7 +131,7 @@ fun RecentScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(state.recent, key = { it.comic.id }) { row ->
-                    RecentListItem(row,
+                    RecentListItem(row, showCover = state.showCovers,
                         onClick = {
                             when (row.cache?.state) {
                                 CacheState.READY -> nav.navigate("reader/${row.comic.id}")
@@ -151,6 +151,7 @@ fun RecentScreen(
 @Composable
 private fun RecentListItem(
     row: ComicRow,
+    showCover: Boolean,
     onClick: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -171,7 +172,7 @@ private fun RecentListItem(
             ) {
                 SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(row.comic.coverPath?.let { File(it) })
+                        .data(if (showCover) row.comic.coverPath?.let { File(it) } else null)
                         .crossfade(true)
                         .build(),
                     contentDescription = null,

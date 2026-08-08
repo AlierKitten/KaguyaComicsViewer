@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -90,12 +93,14 @@ fun ReaderScreen(
                     ReadingMode.PAGED -> PagedReader(
                         state = state,
                         onPageChange = viewModel::goTo,
-                        onTap = { showOverlay = !showOverlay }
+                        onTap = { showOverlay = !showOverlay },
+                        zoomEnabled = showOverlay
                     )
                     ReadingMode.CONTINUOUS -> VerticalPagedReader(
                         state = state,
                         onPageChange = viewModel::goTo,
-                        onTap = { showOverlay = !showOverlay }
+                        onTap = { showOverlay = !showOverlay },
+                        zoomEnabled = showOverlay
                     )
                     ReadingMode.WEBTOON -> ContinuousReader(
                         state = state,
@@ -107,23 +112,62 @@ fun ReaderScreen(
         }
 
         if (showOverlay && state.pages.isNotEmpty() && !state.isLoading) {
-            ReaderTopBar(
-                title = state.comic?.title.orEmpty(),
-                page = state.page + 1,
-                total = state.pages.size,
-                mode = state.mode,
-                onBack = onBack,
-                onModeChange = { mode ->
-                    viewModel.setMode(mode)
-                    val modeName = when (mode) {
-                        ReadingMode.PAGED -> "左右翻页"
-                        ReadingMode.CONTINUOUS -> "上下翻页"
-                        ReadingMode.WEBTOON -> "条带滚动"
+            // 顶部半透明栏
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, tint = Color.White)
                     }
-                    Toast.makeText(context, "当前模式：$modeName", Toast.LENGTH_SHORT).show()
-                },
-                onPageInput = viewModel::goTo
-            )
+                    Text(
+                        state.comic?.title.orEmpty(),
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = {
+                        val nextMode = when (state.mode) {
+                            ReadingMode.PAGED -> ReadingMode.CONTINUOUS
+                            ReadingMode.CONTINUOUS -> ReadingMode.WEBTOON
+                            ReadingMode.WEBTOON -> ReadingMode.PAGED
+                        }
+                        viewModel.setMode(nextMode)
+                        val modeName = when (nextMode) {
+                            ReadingMode.PAGED -> "左右翻页"
+                            ReadingMode.CONTINUOUS -> "上下翻页"
+                            ReadingMode.WEBTOON -> "条带滚动"
+                        }
+                        Toast.makeText(context, "当前模式：$modeName", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Outlined.SwapHoriz, null, tint = Color.White)
+                    }
+                }
+            }
+            // 底部页码
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .padding(8.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "第 ${state.page + 1} / ${state.pages.size} 页",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
     }
 }
@@ -132,7 +176,8 @@ fun ReaderScreen(
 private fun PagedReader(
     state: ReaderUiState,
     onPageChange: (Int) -> Unit,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    zoomEnabled: Boolean
 ) {
     if (state.pages.isEmpty()) {
         EmptyState()
@@ -156,7 +201,7 @@ private fun PagedReader(
                 detectTapGestures(onTap = { onTap() })
             }
     ) { pageIndex ->
-        PageView(state.pages[pageIndex].path)
+        PageView(state.pages[pageIndex].path, zoomEnabled = zoomEnabled)
     }
 }
 
@@ -164,7 +209,8 @@ private fun PagedReader(
 private fun VerticalPagedReader(
     state: ReaderUiState,
     onPageChange: (Int) -> Unit,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    zoomEnabled: Boolean
 ) {
     if (state.pages.isEmpty()) {
         EmptyState()
@@ -188,7 +234,7 @@ private fun VerticalPagedReader(
                 detectTapGestures(onTap = { onTap() })
             }
     ) { pageIndex ->
-        PageView(state.pages[pageIndex].path)
+        PageView(state.pages[pageIndex].path, zoomEnabled = zoomEnabled)
     }
 }
 
@@ -225,8 +271,34 @@ private fun ContinuousReader(
 }
 
 @Composable
-private fun PageView(path: String) {
-    Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(), contentAlignment = Alignment.Center) {
+private fun PageView(path: String, zoomEnabled: Boolean = false) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    // 遮罩隐藏时重置缩放和平移
+    LaunchedEffect(zoomEnabled) {
+        if (!zoomEnabled) {
+            scale = 1f
+            offset = Offset.Zero
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .pointerInput(zoomEnabled) {
+                if (zoomEnabled) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, 5f)
+                        if (scale > 1f) {
+                            offset = offset + pan
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
         SubcomposeAsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
                 .data(File(path))
@@ -236,7 +308,14 @@ private fun PageView(path: String) {
             contentScale = ContentScale.Fit,
             loading = { CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(28.dp), color = Color.White.copy(alpha = 0.5f)) },
             error = { Text("加载失败", color = Color.White) },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                }
         )
     }
 }
@@ -286,65 +365,4 @@ private fun ErrorState(error: String, onRetry: () -> Unit, onBack: () -> Unit) {
     }
 }
 
-@Composable
-private fun ReaderTopBar(
-    title: String,
-    page: Int,
-    total: Int,
-    mode: ReadingMode,
-    onBack: () -> Unit,
-    onModeChange: (ReadingMode) -> Unit,
-    onPageInput: (Int) -> Unit
-) {
-    Box(Modifier.fillMaxSize()) {
-        // 顶部半透明栏
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.5f))
-                .padding(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, null, tint = Color.White)
-                }
-                Text(
-                    title,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = {
-                    val nextMode = when (mode) {
-                        ReadingMode.PAGED -> ReadingMode.CONTINUOUS
-                        ReadingMode.CONTINUOUS -> ReadingMode.WEBTOON
-                        ReadingMode.WEBTOON -> ReadingMode.PAGED
-                    }
-                    onModeChange(nextMode)
-                }) {
-                    Icon(Icons.Outlined.SwapHoriz, null, tint = Color.White)
-                }
-            }
-        }
-        // 底部页码
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.5f))
-                .padding(8.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "第 $page / $total 页",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-    }
-}
+

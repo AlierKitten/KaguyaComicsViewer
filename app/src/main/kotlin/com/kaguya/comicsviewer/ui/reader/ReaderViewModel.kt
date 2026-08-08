@@ -1,5 +1,7 @@
 package com.kaguya.comicsviewer.ui.reader
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -11,13 +13,18 @@ import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicPage
 import com.kaguya.comicsviewer.domain.model.ReadingMode
 import com.kaguya.comicsviewer.domain.usecase.SaveProgressUseCase
+import com.kaguya.comicsviewer.util.CacheDirectories
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import javax.inject.Inject
 
 data class ReaderUiState(
@@ -35,6 +42,7 @@ class ReaderViewModel @Inject constructor(
     private val repository: ComicRepository,
     private val settings: SettingsRepository,
     private val saveProgress: SaveProgressUseCase,
+    private val cacheDirs: CacheDirectories,
     private val savedState: SavedStateHandle
 ) : ViewModel() {
 
@@ -63,11 +71,53 @@ class ReaderViewModel @Inject constructor(
             val initialPage = runCatching { repository.observeProgress(comicId).first()?.page ?: 0 }
                 .getOrDefault(0)
             val page = initialPage.coerceIn(0, (list.size - 1).coerceAtLeast(0))
+
+            // 检查封面文件是否存在，不存在则重新生成
+            val updatedComic = ensureCover(comic, list)
+
             _state.value = ReaderUiState(
-                comic = comic, pages = list, page = page, mode = s.readingMode,
+                comic = updatedComic, pages = list, page = page, mode = s.readingMode,
                 keepScreenOn = s.keepScreenOn, isLoading = false, error = null
             )
         }
+    }
+
+    /** 如果封面文件不存在，从解压目录的第一页重新生成 */
+    private suspend fun ensureCover(comic: Comic?, pages: List<ComicPage>): Comic? {
+        if (comic == null || pages.isEmpty()) return comic
+        val coverPath = comic.coverPath
+        if (coverPath != null && File(coverPath).exists()) return comic
+        // 封面不存在，从第一页生成缩略图
+        val firstPage = pages.firstOrNull() ?: return comic
+        val firstPageFile = File(firstPage.path)
+        if (!firstPageFile.exists()) return comic
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val coverFile = cacheDirs.coverFile(comicId)
+                val bytes = firstPageFile.readBytes()
+                generateThumbnail(bytes, coverFile)
+                val newCoverPath = coverFile.absolutePath
+                val updated = comic.copy(coverPath = newCoverPath)
+                repository.upsertComic(updated)
+                Log.d("ReaderViewModel", "regenerated cover: $newCoverPath")
+                updated
+            }.getOrDefault(comic)
+        }
+    }
+
+    private fun generateThumbnail(imageData: ByteArray, outputFile: File, maxWidth: Int = 300, quality: Int = 75) {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(imageData, 0, imageData.size, options)
+        var sampleSize = 1
+        if (options.outWidth > maxWidth) {
+            sampleSize = (options.outWidth.toFloat() / maxWidth).toInt()
+        }
+        var power = 1
+        while (power * 2 <= sampleSize) power *= 2
+        val decodeOptions = BitmapFactory.Options().apply { inSampleSize = power }
+        val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size, decodeOptions) ?: return
+        FileOutputStream(outputFile).use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out) }
+        bitmap.recycle()
     }
 
     fun goTo(p: Int) {
