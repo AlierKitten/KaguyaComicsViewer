@@ -21,10 +21,11 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideDatabase(@ApplicationContext context: Context): KaguyaDatabase =
-        Room.databaseBuilder(context, KaguyaDatabase::class.java, "kaguya.db")
+    fun provideDatabase(@ApplicationContext context: Context): KaguyaDatabase {
+        return Room.databaseBuilder(context, KaguyaDatabase::class.java, "kaguya.db")
             .fallbackToDestructiveMigration()
             .build()
+    }
 
     @Provides
     fun provideComicSourceDao(db: KaguyaDatabase): ComicSourceDao = db.sourceDao()

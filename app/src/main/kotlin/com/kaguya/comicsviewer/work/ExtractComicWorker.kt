@@ -114,11 +114,24 @@ class ExtractComicWorker @AssistedInject constructor(
 
         // 生成封面缩略图（根据设置）
         val enableCover = runCatching { settings.settings.first().enableCoverGeneration }.getOrDefault(true)
+        var coverPath: String? = null
         if (enableCover) {
             val coverFile = cacheDirs.coverFile(comicId)
-            runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
-                generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
-                Log.d(TAG, "doWork: cover thumbnail written, size=${coverFile.length()}")
+            // 优先从解压目录生成封面
+            val firstImage = target.listFiles()?.filter { it.isImageFile() }?.sortedBy { it.name }?.firstOrNull()
+            if (firstImage != null) {
+                runCatching { firstImage.readBytes() }.getOrNull()?.let { bytes ->
+                    generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
+                    coverPath = coverFile.absolutePath
+                    Log.d(TAG, "doWork: cover thumbnail written from extracted, size=${coverFile.length()}")
+                }
+            } else {
+                // 回退：从压缩包读取
+                runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
+                    generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
+                    coverPath = coverFile.absolutePath
+                    Log.d(TAG, "doWork: cover thumbnail written from archive, size=${coverFile.length()}")
+                }
             }
         } else {
             Log.d(TAG, "doWork: cover generation disabled, skipping")
@@ -127,6 +140,13 @@ class ExtractComicWorker @AssistedInject constructor(
         // 记录总页数
         repository.updatePageCount(comicId, count)
         Log.d(TAG, "doWork: pageCount updated to $count")
+
+        // 更新漫画封面路径
+        if (coverPath != null) {
+            repository.findComic(comicId)?.let { comic ->
+                repository.upsertComic(comic.copy(coverPath = coverPath))
+            }
+        }
 
         // 标记为就绪
         repository.upsertCache(
@@ -184,5 +204,13 @@ class ExtractComicWorker @AssistedInject constructor(
             power *= 2
         }
         return power.coerceAtLeast(1)
+    }
+
+    private fun File.isImageFile(): Boolean {
+        val n = name.lowercase()
+        return n.endsWith(".jpg") || n.endsWith(".jpeg") ||
+            n.endsWith(".png") || n.endsWith(".webp") ||
+            n.endsWith(".gif") || n.endsWith(".bmp") ||
+            n.endsWith(".avif") || n.endsWith(".heic")
     }
 }

@@ -93,17 +93,18 @@ fun LibraryScreen(
         }
     }
 
-    // 加载进度弹窗（READY 和 PENDING 初始状态不弹，失败时弹出）
+    // 加载进度弹窗（READY 不弹，失败/加载中时弹出）
     loadingProgress?.let { lp ->
         when (lp.state) {
-            CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.DOWNLOADED, CacheState.FAILED -> {
+            CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.DOWNLOADED,
+            CacheState.PENDING, CacheState.FAILED -> {
                 LoadingDialog(
                     progress = lp,
                     onDismiss = { viewModel.dismissLoading() },
                     onCancel = { viewModel.cancelLoading(lp.comicId) }
                 )
             }
-            else -> Unit // PENDING / READY 不弹 dialog
+            else -> Unit // READY 不弹 dialog
         }
     }
 
@@ -338,11 +339,25 @@ private fun ComicGridItem(row: ComicRow, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.Medium
                 )
-                Text(
-                    FormatUtils.formatBytes(row.comic.sizeBytes),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        FormatUtils.formatBytes(row.comic.sizeBytes),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (row.isFinished) {
+                        Text(
+                            "已读完",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF4CAF50),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     }
@@ -397,11 +412,25 @@ private fun ComicListItem(row: ComicRow, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    FormatUtils.formatBytes(row.comic.sizeBytes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        FormatUtils.formatBytes(row.comic.sizeBytes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (row.isFinished) {
+                        Text(
+                            "已读完",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF4CAF50),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
                 row.cache?.let { cache ->
                     when (cache.state) {
                         CacheState.DOWNLOADING, CacheState.EXTRACTING -> {

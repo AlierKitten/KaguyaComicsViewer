@@ -17,17 +17,11 @@ class DownloadComicUseCase @Inject constructor(
     suspend operator fun invoke(comicId: Long) {
         Log.d(TAG, "invoke: comicId=$comicId")
         val comic = repository.findComic(comicId)
-        if (comic == null) {
-            Log.w(TAG, "invoke: comic not found for id=$comicId")
-            return
-        }
+            ?: throw IllegalStateException("漫画不存在: id=$comicId")
         Log.d(TAG, "invoke: found comic '${comic.title}', sourceId=${comic.sourceId}, filePath=${comic.filePath}")
         val sources = repository.listEnabledSources()
         val source = sources.firstOrNull { it.id == comic.sourceId }
-        if (source == null) {
-            Log.w(TAG, "invoke: source not found for sourceId=${comic.sourceId}")
-            return
-        }
+            ?: throw IllegalStateException("文件源不存在或已禁用: sourceId=${comic.sourceId}")
         Log.d(TAG, "invoke: scheduling download for '${comic.title}', source=${source.name}, type=${source.type}, localUri=${source.localUri}")
         scheduler.scheduleDownloadAndExtract(comic, source)
         Log.d(TAG, "invoke: download scheduled successfully")

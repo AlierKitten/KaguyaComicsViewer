@@ -54,6 +54,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showClearDialog by remember { mutableStateOf(false) }
+    var showClearCoversDialog by remember { mutableStateOf(false) }
 
     if (showClearDialog) {
         AlertDialog(
@@ -68,6 +69,23 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showClearCoversDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCoversDialog = false },
+            title = { Text("清除所有封面") },
+            text = { Text("将删除所有漫画的封面缩略图，刷新文件源后会重新生成。确定继续？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearAllCovers()
+                    showClearCoversDialog = false
+                }) { Text("确定", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCoversDialog = false }) { Text("取消") }
             }
         )
     }
@@ -107,12 +125,6 @@ fun SettingsScreen(
                     checked = state.settings.keepScreenOn,
                     onChange = viewModel::setKeepScreenOn
                 )
-                ToggleRow(
-                    title = "读完自动标记",
-                    subtitle = "阅读到最后一页时自动标记已读完",
-                    checked = state.settings.autoMarkRead,
-                    onChange = viewModel::setAutoMarkRead
-                )
             }
 
             SectionCard(title = "存储", icon = Icons.Outlined.CleaningServices) {
@@ -124,7 +136,7 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("缓存：${state.cacheSize}", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { showClearDialog = true },
                     enabled = !state.isClearing,
@@ -145,6 +157,30 @@ fun SettingsScreen(
                         Spacer(Modifier.width(8.dp))
                     }
                     Text(if (state.isClearing) "清理中..." else "清除所有缓存")
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("封面：${state.coverSize}", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { showClearCoversDialog = true },
+                    enabled = !state.isClearingCovers,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    if (state.isClearingCovers) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (state.isClearingCovers) "清理中..." else "清除所有封面")
                 }
             }
 

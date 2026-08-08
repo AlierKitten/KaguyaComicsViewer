@@ -134,8 +134,12 @@ class LibraryViewModel @Inject constructor(
     val state: StateFlow<LibraryUiState> = combine(
         comicsFlow, recentFlow, query, scanning, displayMode
     ) { comics, recent, q, sc, dm ->
-        val filtered = if (q.isBlank()) comics else comics.filter {
-            it.comic.title.contains(q, ignoreCase = true)
+        val filtered = if (q.isBlank()) comics else {
+            val keywords = q.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+            if (keywords.isEmpty()) comics
+            else comics.filter { row ->
+                keywords.all { keyword -> row.comic.title.contains(keyword, ignoreCase = true) }
+            }
         }
         LibraryUiState(isScanning = sc, comics = filtered, recent = recent, query = q, displayMode = dm)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryUiState())

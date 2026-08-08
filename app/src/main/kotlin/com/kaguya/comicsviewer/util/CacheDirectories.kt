@@ -35,6 +35,21 @@ class CacheDirectories @Inject constructor(
     fun extractedDir(comicId: Long): File = File(extracted, "comic_$comicId")
     fun coverFile(comicId: Long): File = File(covers, "comic_$comicId.jpg")
 
-    /** 缓存总占用（字节）。 */
-    fun totalSizeBytes(): Long = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    /** 缓存总占用（字节），不包含封面。 */
+    fun totalSizeBytes(): Long {
+        var size = 0L
+        if (archives.exists()) size += archives.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        if (extracted.exists()) size += extracted.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        return size
+    }
+
+    /** 封面占用（字节）。 */
+    fun coverSizeBytes(): Long = if (covers.exists()) covers.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
+
+    /** 清除所有封面文件。 */
+    fun clearCovers() {
+        if (covers.exists()) {
+            covers.listFiles()?.forEach { it.delete() }
+        }
+    }
 }

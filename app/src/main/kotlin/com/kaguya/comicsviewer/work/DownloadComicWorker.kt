@@ -95,6 +95,7 @@ class DownloadComicWorker @AssistedInject constructor(
                 }
                 ComicSourceType.SMB -> {
                     val remote = inputData.getString(WorkParams.REMOTE_PATH)
+                    Log.d(TAG, "doWork: SMB remote='$remote', host='${realSource.host}', share='${realSource.share}', path='${realSource.path}'")
                     if (remote.isNullOrBlank()) {
                         Log.e(TAG, "doWork: remote path is null or blank")
                         return Result.failure()
@@ -103,6 +104,16 @@ class DownloadComicWorker @AssistedInject constructor(
                 }
             }
             Log.d(TAG, "doWork: download complete, file size=${outFile.length()}")
+            // 更新漫画的文件大小（SMB 源扫描时不获取大小，下载后更新）
+            val downloadedSize = outFile.length()
+            if (downloadedSize > 0) {
+                repository.findComic(comicId)?.let { comic ->
+                    if (comic.sizeBytes != downloadedSize) {
+                        repository.upsertComic(comic.copy(sizeBytes = downloadedSize))
+                        Log.d(TAG, "doWork: updated comic sizeBytes to $downloadedSize")
+                    }
+                }
+            }
             repository.upsertCache(
                 ComicCache(
                     comicId = comicId,
@@ -118,8 +129,8 @@ class DownloadComicWorker @AssistedInject constructor(
             Log.d(TAG, "doWork: success")
             Result.success(workDataOf("archivePath" to outFile.absolutePath))
         } catch (e: Exception) {
-            Log.e(TAG, "doWork: failed", e)
-            notifications.showFailed(comicId, title, e.message)
+            Log.e(TAG, "doWork: failed, exception=${e.javaClass.simpleName}: ${e.message}", e)
+            notifications.showFailed(comicId, title, e.message ?: e.javaClass.simpleName)
             repository.upsertCache(
                 ComicCache(
                     comicId = comicId,
@@ -128,7 +139,7 @@ class DownloadComicWorker @AssistedInject constructor(
                     extractedDir = null,
                     totalBytes = 0,
                     downloadedBytes = 0,
-                    lastError = e.message
+                    lastError = e.message ?: e.javaClass.simpleName
                 )
             )
             if (outFile.exists() && outFile.length() == 0L) outFile.delete()
@@ -191,10 +202,13 @@ class DownloadComicWorker @AssistedInject constructor(
         title: String
     ) = withContext(Dispatchers.IO) {
         val comicId = inputData.getLong(WorkParams.COMIC_ID, 0)
-        val total = runCatching { smbClient.getFileSize(source, remote) }.getOrDefault(-1L)
+        Log.d(TAG, "downloadFromSmb: start, comicId=$comicId, remote='$remote'")
+        val total = runCatching { smbClient.getFileSize(source, remote) }.onFailure { Log.e(TAG, "downloadFromSmb: getFileSize failed", it) }.getOrDefault(-1L)
+        Log.d(TAG, "downloadFromSmb: fileSize=$total")
         var copied = 0L
         var lastPercent = -1
         smbClient.readFile(source, remote) { input ->
+            Log.d(TAG, "downloadFromSmb: inputStream opened, starting copy")
             FileOutputStream(outFile).use { out ->
                 val buf = ByteArray(128 * 1024)
                 while (true) {
@@ -228,6 +242,7 @@ class DownloadComicWorker @AssistedInject constructor(
                 }
             }
         }
+        Log.d(TAG, "downloadFromSmb: copy complete, copied=$copied, outFile.size=${outFile.length()}")
     }
 
     private fun findFile(root: DocumentFile, relativePath: String): DocumentFile? {

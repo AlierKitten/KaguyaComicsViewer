@@ -1,6 +1,7 @@
 package com.kaguya.comicsviewer.ui.reader
 
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -112,7 +113,15 @@ fun ReaderScreen(
                 total = state.pages.size,
                 mode = state.mode,
                 onBack = onBack,
-                onModeChange = viewModel::setMode,
+                onModeChange = { mode ->
+                    viewModel.setMode(mode)
+                    val modeName = when (mode) {
+                        ReadingMode.PAGED -> "左右翻页"
+                        ReadingMode.CONTINUOUS -> "上下翻页"
+                        ReadingMode.WEBTOON -> "条带滚动"
+                    }
+                    Toast.makeText(context, "当前模式：$modeName", Toast.LENGTH_SHORT).show()
+                },
                 onPageInput = viewModel::goTo
             )
         }
@@ -305,7 +314,14 @@ private fun ReaderTopBar(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = { onModeChange(if (mode == ReadingMode.PAGED) ReadingMode.CONTINUOUS else ReadingMode.PAGED) }) {
+                IconButton(onClick = {
+                    val nextMode = when (mode) {
+                        ReadingMode.PAGED -> ReadingMode.CONTINUOUS
+                        ReadingMode.CONTINUOUS -> ReadingMode.WEBTOON
+                        ReadingMode.WEBTOON -> ReadingMode.PAGED
+                    }
+                    onModeChange(nextMode)
+                }) {
                     Icon(Icons.Outlined.SwapHoriz, null, tint = Color.White)
                 }
             }

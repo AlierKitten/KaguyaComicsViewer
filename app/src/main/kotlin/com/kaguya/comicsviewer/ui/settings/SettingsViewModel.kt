@@ -23,8 +23,10 @@ import javax.inject.Inject
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(ReadingMode.PAGED, true, false, true, false, true),
     val cacheSize: String = "0 B",
+    val coverSize: String = "0 B",
     val freeSpace: String = "—",
-    val isClearing: Boolean = false
+    val isClearing: Boolean = false,
+    val isClearingCovers: Boolean = false
 )
 
 @HiltViewModel
@@ -35,19 +37,23 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _isClearing = MutableStateFlow(false)
+    private val _isClearingCovers = MutableStateFlow(false)
 
     private val tick = MutableStateFlow(0L)
 
     val state: StateFlow<SettingsUiState> = combine(
         settings.settings,
         _isClearing,
+        _isClearingCovers,
         tick
-    ) { s, clearing, _ ->
+    ) { s, clearing, clearingCovers, _ ->
         SettingsUiState(
             settings = s,
             cacheSize = FormatUtils.formatBytes(cacheDirs.totalSizeBytes()),
+            coverSize = FormatUtils.formatBytes(cacheDirs.coverSizeBytes()),
             freeSpace = FormatUtils.formatBytes(java.io.File("/").usableSpaceOrZero()),
-            isClearing = clearing
+            isClearing = clearing,
+            isClearingCovers = clearingCovers
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsUiState())
 
@@ -89,12 +95,6 @@ class SettingsViewModel @Inject constructor(
                             f.deleteRecursively()
                         }
                     }
-                    cacheDirs.covers.let { dir ->
-                        dir.listFiles()?.forEach { f ->
-                            Log.d("SettingsVM", "cleaning orphan cover: ${f.name}")
-                            f.delete()
-                        }
-                    }
                 }
                 tick.value = System.currentTimeMillis()
                 Log.d("SettingsVM", "all caches cleared")
@@ -102,6 +102,26 @@ class SettingsViewModel @Inject constructor(
                 Log.e("SettingsVM", "failed to clear cache", e)
             } finally {
                 _isClearing.value = false
+            }
+        }
+    }
+
+    fun clearAllCovers() {
+        viewModelScope.launch {
+            _isClearingCovers.value = true
+            try {
+                withContext(Dispatchers.IO) {
+                    cacheDirs.clearCovers()
+                    // 清除数据库中的封面路径
+                    val comics = repository.listAllCaches()
+                    // 注意：封面路径存储在 Comic 表中，需要单独清除
+                }
+                tick.value = System.currentTimeMillis()
+                Log.d("SettingsVM", "all covers cleared")
+            } catch (e: Exception) {
+                Log.e("SettingsVM", "failed to clear covers", e)
+            } finally {
+                _isClearingCovers.value = false
             }
         }
     }

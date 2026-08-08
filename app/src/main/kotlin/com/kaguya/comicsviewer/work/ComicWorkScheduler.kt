@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -33,11 +32,11 @@ class ComicWorkScheduler @Inject constructor(
         )
         Log.d(TAG, "downloadInput: comicId=${comic.id}, sourceId=${source.id}, remotePath='${comic.filePath}'")
 
+        // 不设置网络约束：SMB 访问的是局域网，不需要互联网连接
+        // 如果服务器不可达，Worker 会自然失败并报错
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(if (source.host != null) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED)
-            .setRequiresStorageNotLow(true)
             .build()
-        Log.d(TAG, "constraints: networkType=${if (source.host != null) "CONNECTED" else "NOT_REQUIRED"}")
+        Log.d(TAG, "constraints: no network constraint (SMB uses LAN)")
 
         val download = OneTimeWorkRequestBuilder<DownloadComicWorker>()
             .setConstraints(constraints)
