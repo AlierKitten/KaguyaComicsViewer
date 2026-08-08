@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class SettingsUiState(
-    val settings: AppSettings = AppSettings(ReadingMode.PAGED, true, false),
+    val settings: AppSettings = AppSettings(ReadingMode.PAGED, true, false, true, false, true),
     val cacheSize: String = "0 B",
     val freeSpace: String = "—",
     val isClearing: Boolean = false
@@ -54,6 +54,15 @@ class SettingsViewModel @Inject constructor(
     fun setMode(mode: ReadingMode) = viewModelScope.launch { settings.setReadingMode(mode) }
     fun setKeepScreenOn(enabled: Boolean) = viewModelScope.launch { settings.setKeepScreenOn(enabled) }
     fun setAutoMarkRead(enabled: Boolean) = viewModelScope.launch { settings.setAutoMarkRead(enabled) }
+    fun setFollowSystemTheme(enabled: Boolean) = viewModelScope.launch {
+        settings.setFollowSystemTheme(enabled)
+        // 开启跟随系统时，自动关闭手动深色模式
+        if (enabled) {
+            settings.setDarkMode(false)
+        }
+    }
+    fun setDarkMode(enabled: Boolean) = viewModelScope.launch { settings.setDarkMode(enabled) }
+    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { settings.setDynamicColor(enabled) }
 
     fun clearAllCache() {
         viewModelScope.launch {

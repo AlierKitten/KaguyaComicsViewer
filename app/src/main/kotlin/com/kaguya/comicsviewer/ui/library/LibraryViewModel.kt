@@ -1,9 +1,9 @@
 package com.kaguya.comicsviewer.ui.library
 
 import android.util.Log
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kaguya.comicsviewer.data.prefs.SettingsRepository
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -26,11 +27,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class LibraryDisplayMode { GRID, LIST }
+
 data class LibraryUiState(
     val isScanning: Boolean = false,
     val comics: List<ComicRow> = emptyList(),
     val recent: List<ComicRow> = emptyList(),
-    val query: String = ""
+    val query: String = "",
+    val displayMode: LibraryDisplayMode = LibraryDisplayMode.GRID
 )
 
 data class ComicRow(
@@ -54,11 +58,24 @@ class LibraryViewModel @Inject constructor(
     private val repository: ComicRepository,
     private val scanUseCase: ScanSourceUseCase,
     private val downloadUseCase: DownloadComicUseCase,
-    private val savedState: SavedStateHandle
+    private val settings: SettingsRepository
 ) : ViewModel() {
 
-    private val query = MutableStateFlow(savedState.get<String>("q").orEmpty())
+    private val query = MutableStateFlow("")
     private val scanning = MutableStateFlow(false)
+    private val displayMode = MutableStateFlow(LibraryDisplayMode.GRID)
+
+    init {
+        // 仅监听显示模式变化
+        viewModelScope.launch {
+            settings.settings
+                .map { it.libraryDisplayMode }
+                .distinctUntilChanged()
+                .collect { mode ->
+                    displayMode.value = LibraryDisplayMode.entries[mode]
+                }
+        }
+    }
     private val sourceIds = repository.observeSources().map { srcs -> srcs.filter { it.enabled }.map { it.id } }
 
     // 当前正在加载的漫画进度
@@ -104,17 +121,26 @@ class LibraryViewModel @Inject constructor(
     }
 
     val state: StateFlow<LibraryUiState> = combine(
-        comicsFlow, recentFlow, query, scanning
-    ) { comics, recent, q, sc ->
+        comicsFlow, recentFlow, query, scanning, displayMode
+    ) { comics, recent, q, sc, dm ->
         val filtered = if (q.isBlank()) comics else comics.filter {
             it.comic.title.contains(q, ignoreCase = true)
         }
-        LibraryUiState(isScanning = sc, comics = filtered, recent = recent, query = q)
+        LibraryUiState(isScanning = sc, comics = filtered, recent = recent, query = q, displayMode = dm)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryUiState())
 
     fun setQuery(q: String) {
         query.value = q
-        savedState["q"] = q
+    }
+
+    fun clearQuery() {
+        query.value = ""
+    }
+
+    fun toggleDisplayMode() {
+        val next = if (displayMode.value == LibraryDisplayMode.GRID) LibraryDisplayMode.LIST else LibraryDisplayMode.GRID
+        displayMode.value = next
+        viewModelScope.launch { settings.setLibraryDisplayMode(next.ordinal) }
     }
 
     fun scanAll() {

@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.settings
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -141,7 +142,28 @@ fun SettingsScreen(
             }
 
             SectionCard(title = "主题", icon = Icons.Outlined.Brightness6) {
-                Text("主题色随系统动态切换（Android 12+）", style = MaterialTheme.typography.bodyMedium)
+                ToggleRow(
+                    title = "跟随系统主题",
+                    subtitle = "自动根据系统设置切换深浅色模式",
+                    checked = state.settings.followSystemTheme,
+                    onChange = viewModel::setFollowSystemTheme
+                )
+                ToggleRow(
+                    title = "深色模式",
+                    subtitle = "手动启用深色模式",
+                    checked = state.settings.darkMode,
+                    enabled = !state.settings.followSystemTheme,
+                    onChange = viewModel::setDarkMode
+                )
+                ToggleRow(
+                    title = "动态主题色",
+                    subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                        "使用系统壁纸颜色作为主题色（Android 12+）"
+                    else
+                        "需要 Android 12 及以上版本",
+                    checked = state.settings.dynamicColor,
+                    onChange = viewModel::setDynamicColor
+                )
             }
         }
     }
@@ -171,6 +193,7 @@ private fun ToggleRow(
     title: String,
     subtitle: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onChange: (Boolean) -> Unit
 ) {
     Row(
@@ -178,9 +201,17 @@ private fun ToggleRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            )
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }

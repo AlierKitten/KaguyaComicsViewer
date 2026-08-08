@@ -14,15 +14,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.ViewAgenda
+import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -106,6 +111,12 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("漫画库") },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleDisplayMode() }) {
+                        Icon(
+                            if (state.displayMode == LibraryDisplayMode.GRID) Icons.Outlined.ViewList else Icons.Outlined.ViewAgenda,
+                            contentDescription = "切换视图"
+                        )
+                    }
                     IconButton(onClick = { viewModel.scanAll() }) {
                         if (state.isScanning) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                         else Icon(Icons.Outlined.Refresh, contentDescription = "扫描")
@@ -121,13 +132,21 @@ fun LibraryScreen(
                 onValueChange = viewModel::setQuery,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 singleLine = true,
+                shape = RoundedCornerShape(12.dp),
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.clearQuery() }) {
+                            Icon(Icons.Outlined.Clear, contentDescription = "清空")
+                        }
+                    }
+                },
                 placeholder = { Text("搜索漫画") }
             )
 
             if (state.comics.isEmpty() && state.recent.isEmpty()) {
                 EmptyLibrary()
-            } else {
+            } else if (state.displayMode == LibraryDisplayMode.GRID) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(120.dp),
                     contentPadding = PaddingValues(16.dp),
@@ -137,6 +156,18 @@ fun LibraryScreen(
                 ) {
                     items(state.comics, key = { it.comic.id }) { row ->
                         ComicGridItem(row, onClick = {
+                            handleComicClick(row, nav, viewModel)
+                        })
+                    }
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(state.comics, key = { it.comic.id }) { row ->
+                        ComicListItem(row, onClick = {
                             handleComicClick(row, nav, viewModel)
                         })
                     }
@@ -299,6 +330,78 @@ private fun ComicGridItem(row: ComicRow, onClick: () -> Unit) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComicListItem(row: ComicRow, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 60.dp, height = 80.dp)
+                    .clip(RoundedCornerShape(4.dp))
+            ) {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(row.comic.coverPath?.let { File(it) })
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        }
+                    },
+                    error = {
+                        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Outlined.AutoStories, null)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f).padding(start = 12.dp)
+            ) {
+                Text(
+                    row.comic.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    FormatUtils.formatBytes(row.comic.sizeBytes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                row.cache?.let { cache ->
+                    when (cache.state) {
+                        CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text("加载中...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                        CacheState.PENDING -> {
+                            Spacer(Modifier.height(4.dp))
+                            Text("待加载", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        else -> Unit
+                    }
+                }
             }
         }
     }

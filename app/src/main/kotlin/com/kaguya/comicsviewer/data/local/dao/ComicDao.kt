@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.kaguya.comicsviewer.data.local.entity.ComicCacheEntity
+import com.kaguya.comicsviewer.data.local.entity.ComicCountEntity
 import com.kaguya.comicsviewer.data.local.entity.ComicEntity
 import com.kaguya.comicsviewer.data.local.entity.ReadingProgressEntity
 import kotlinx.coroutines.flow.Flow
@@ -84,6 +85,9 @@ interface ComicDao {
 
     @Query("SELECT * FROM reading_progress WHERE comic_id = :comicId")
     suspend fun findProgress(comicId: Long): ReadingProgressEntity?
+
+    @Query("SELECT source_id, COUNT(*) FROM comics WHERE source_id IN (:sourceIds) GROUP BY source_id")
+    fun countBySources(sourceIds: List<Long>): Flow<List<ComicCountEntity>>
 
     @Query("SELECT * FROM reading_progress WHERE comic_id = :comicId")
     fun observeProgress(comicId: Long): Flow<ReadingProgressEntity?>

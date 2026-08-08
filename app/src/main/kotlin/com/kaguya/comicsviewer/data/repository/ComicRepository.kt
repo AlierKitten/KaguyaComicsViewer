@@ -16,6 +16,7 @@ interface ComicRepository {
     suspend fun markSourceScanned(id: Long, timestamp: Long)
 
     fun observeComicsBySources(sourceIds: List<Long>): Flow<List<Comic>>
+    fun observeComicCountBySources(sourceIds: List<Long>): Flow<Map<Long, Int>>
     suspend fun listComicsBySources(sourceIds: List<Long>): List<Comic>
     fun observeComic(id: Long): Flow<Comic?>
     fun observeRecent(limit: Int): Flow<List<Comic>>

@@ -76,7 +76,7 @@ fun SourcesScreen(
     val smbClient = viewModel.smbClient
     val context = LocalContext.current
     val sources by viewModel.sources.collectAsStateWithLifecycle()
-    val scanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val scanningIds by viewModel.scanningIds.collectAsStateWithLifecycle()
     var showSmb by remember { mutableStateOf(false) }
     var pendingLocalName by remember { mutableStateOf<String?>(null) }
 
@@ -101,7 +101,20 @@ fun SourcesScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("文件源") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("文件源") },
+                actions = {
+                    IconButton(onClick = { viewModel.scanAllEnabled() }) {
+                        if (scanningIds.isNotEmpty()) {
+                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        } else {
+                            Icon(Icons.Outlined.Refresh, contentDescription = "全部刷新")
+                        }
+                    }
+                }
+            )
+        },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExtendedFloatingActionButton(
@@ -140,7 +153,7 @@ fun SourcesScreen(
                 items(sources, key = { it.source.id }) { row ->
                     SourceItem(
                         row = row,
-                        scanning = scanning,
+                        isScanning = row.source.id in scanningIds,
                         onToggle = { viewModel.toggleEnabled(row.source, it) },
                         onScan = { viewModel.scan(row.source) },
                         onDelete = { viewModel.delete(row.source) }
@@ -165,7 +178,7 @@ fun SourcesScreen(
 @Composable
 private fun SourceItem(
     row: SourceRow,
-    scanning: Boolean,
+    isScanning: Boolean,
     onToggle: (Boolean) -> Unit,
     onScan: () -> Unit,
     onDelete: () -> Unit
@@ -193,10 +206,15 @@ private fun SourceItem(
                     }
                 }
                 Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "${row.comicCount} 个漫画",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
             Switch(checked = row.source.enabled, onCheckedChange = onToggle)
-            IconButton(onClick = onScan, enabled = !scanning) {
-                if (scanning) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+            IconButton(onClick = onScan, enabled = !isScanning) {
+                if (isScanning) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 else Icon(Icons.Outlined.Refresh, null)
             }
             IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, null, tint = MaterialTheme.colorScheme.error) }
