@@ -12,11 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
@@ -24,6 +23,7 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,11 +37,12 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,7 +59,6 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.util.FormatUtils
-import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,8 +68,30 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val loadingProgress by viewModel.loadingProgress.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+
+    // 当加载完成(READY)时自动跳转阅读器，不弹 dialog
+    LaunchedEffect(loadingProgress?.state) {
+        if (loadingProgress?.state == CacheState.READY) {
+            val comicId = loadingProgress!!.comicId
+            viewModel.dismissLoading()
+            nav.navigate("reader/$comicId")
+        }
+    }
+
+    // 加载进度弹窗（READY 和 PENDING 初始状态不弹，失败时弹出）
+    loadingProgress?.let { lp ->
+        when (lp.state) {
+            CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.DOWNLOADED, CacheState.FAILED -> {
+                LoadingDialog(
+                    progress = lp,
+                    onDismiss = { viewModel.dismissLoading() }
+                )
+            }
+            else -> Unit // PENDING / READY 不弹 dialog
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -95,37 +117,6 @@ fun LibraryScreen(
                 placeholder = { Text("搜索漫画") }
             )
 
-            if (state.recent.isNotEmpty()) {
-                Text(
-                    "继续阅读",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(state.recent, key = { it.comic.id }) { row ->
-                        RecentItem(row) {
-                            when (row.cache?.state) {
-                                CacheState.READY -> nav.navigate("reader/${row.comic.id}")
-                                CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
-                                    scope.launch { snackbarHostState.showSnackbar("加载中，请稍候...") }
-                                }
-                                CacheState.FAILED -> {
-                                    viewModel.download(row.comic.id)
-                                    scope.launch { snackbarHostState.showSnackbar("重新加载") }
-                                }
-                                CacheState.PENDING, CacheState.DOWNLOADED, null -> {
-                                    viewModel.download(row.comic.id)
-                                    scope.launch { snackbarHostState.showSnackbar("开始加载「${row.comic.title}」") }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             if (state.comics.isEmpty() && state.recent.isEmpty()) {
                 EmptyLibrary()
             } else {
@@ -138,26 +129,90 @@ fun LibraryScreen(
                 ) {
                     items(state.comics, key = { it.comic.id }) { row ->
                         ComicGridItem(row, onClick = {
-                            when (row.cache?.state) {
-                                CacheState.READY -> nav.navigate("reader/${row.comic.id}")
-                                CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
-                                    scope.launch { snackbarHostState.showSnackbar("加载中，请稍候...") }
-                                }
-                                CacheState.FAILED -> {
-                                    viewModel.download(row.comic.id)
-                                    scope.launch { snackbarHostState.showSnackbar("重新加载") }
-                                }
-                                CacheState.PENDING, CacheState.DOWNLOADED, null -> {
-                                    viewModel.download(row.comic.id)
-                                    scope.launch { snackbarHostState.showSnackbar("开始加载「${row.comic.title}」") }
-                                }
-                            }
+                            handleComicClick(row, nav, viewModel)
                         })
                     }
                 }
             }
         }
     }
+}
+
+private fun handleComicClick(
+    row: ComicRow,
+    nav: NavController,
+    viewModel: LibraryViewModel
+) {
+    when (row.cache?.state) {
+        CacheState.READY -> nav.navigate("reader/${row.comic.id}")
+        CacheState.FAILED -> viewModel.startLoading(row.comic.id, row.comic.title)
+        CacheState.PENDING, CacheState.DOWNLOADED, null -> viewModel.startLoading(row.comic.id, row.comic.title)
+        CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
+            // 已经在加载中，重新显示进度弹窗
+            viewModel.startLoading(row.comic.id, row.comic.title)
+        }
+    }
+}
+
+@Composable
+private fun LoadingDialog(progress: LoadingProgress, onDismiss: () -> Unit) {
+    val stateText = when (progress.state) {
+        CacheState.PENDING -> "准备加载..."
+        CacheState.DOWNLOADING, CacheState.EXTRACTING -> "正在加载..."
+        CacheState.DOWNLOADED -> "正在解压..."
+        CacheState.READY -> "加载完成！"
+        CacheState.FAILED -> "加载失败"
+    }
+
+    val showProgress = progress.totalBytes > 0 && progress.state != CacheState.FAILED && progress.state != CacheState.READY
+    val progressValue = if (showProgress) progress.downloadedBytes.toFloat() / progress.totalBytes.toFloat() else 0f
+
+    AlertDialog(
+        onDismissRequest = {
+            if (progress.state == CacheState.FAILED) onDismiss()
+        },
+        title = {
+            Text(progress.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        text = {
+            Column {
+                Text(stateText)
+                if (showProgress) {
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(progress = { progressValue }, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${FormatUtils.formatBytes(progress.downloadedBytes)} / ${FormatUtils.formatBytes(progress.totalBytes)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (progress.state == CacheState.FAILED && progress.error != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        progress.error!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                if (progress.state == CacheState.DOWNLOADING || progress.state == CacheState.EXTRACTING || progress.state == CacheState.PENDING) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("请稍候...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (progress.state == CacheState.FAILED || progress.state == CacheState.READY) {
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("后台加载") }
+            }
+        }
+    )
 }
 
 @Composable
@@ -235,45 +290,6 @@ private fun ComicGridItem(row: ComicRow, onClick: () -> Unit) {
                     FormatUtils.formatBytes(row.comic.sizeBytes),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecentItem(row: ComicRow, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.size(width = 140.dp, height = 180.dp)) {
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().height(130.dp)) {
-                SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(row.comic.coverPath?.let { File(it) })
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    loading = { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp)) } },
-                    error = { Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceVariant) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.AutoStories, null) } } },
-                    modifier = Modifier.fillMaxSize()
-                )
-                if (row.progress > 0) {
-                    Box(Modifier.fillMaxWidth().align(Alignment.BottomCenter)) {
-                        LinearProgressIndicator(
-                            progress = { (row.progress.toFloat() / (row.comic.pageCount.takeIf { it > 0 } ?: 1)).coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxWidth().height(3.dp)
-                        )
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.PlayArrow, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.size(2.dp))
-                Text(
-                    row.comic.title,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

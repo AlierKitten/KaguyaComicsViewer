@@ -113,6 +113,10 @@ class ExtractComicWorker @AssistedInject constructor(
             Log.d(TAG, "doWork: cover written, size=${bytes.size}")
         }
 
+        // 记录总页数
+        repository.updatePageCount(comicId, count)
+        Log.d(TAG, "doWork: pageCount updated to $count")
+
         // 标记为就绪
         repository.upsertCache(
             ComicCache(

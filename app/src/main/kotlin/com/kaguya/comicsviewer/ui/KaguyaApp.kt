@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -25,12 +26,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.kaguya.comicsviewer.R
 import com.kaguya.comicsviewer.ui.library.LibraryScreen
+import com.kaguya.comicsviewer.ui.library.RecentScreen
 import com.kaguya.comicsviewer.ui.reader.ReaderScreen
 import com.kaguya.comicsviewer.ui.settings.SettingsScreen
 import com.kaguya.comicsviewer.ui.sources.SourcesScreen
 
 sealed class Tab(val route: String, val label: Int, val icon: ImageVector) {
     data object Library : Tab("library", R.string.tab_library, Icons.Outlined.AutoStories)
+    data object Recent : Tab("recent", R.string.tab_recent, Icons.Outlined.History)
     data object Sources : Tab("sources", R.string.tab_sources, Icons.Outlined.Folder)
     data object Settings : Tab("settings", R.string.tab_settings, Icons.Outlined.Settings)
 }
@@ -39,15 +42,15 @@ sealed class Tab(val route: String, val label: Int, val icon: ImageVector) {
 fun KaguyaApp() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route
 
-    val showBar = currentRoute in setOf(Tab.Library.route, Tab.Sources.route, Tab.Settings.route)
+    val tabRoutes = listOf(Tab.Library, Tab.Recent, Tab.Sources, Tab.Settings)
+    val showBar = backStack?.destination?.route in tabRoutes.map { it.route }
 
     Scaffold(
         bottomBar = {
             if (showBar) {
                 NavigationBar {
-                    listOf(Tab.Library, Tab.Sources, Tab.Settings).forEach { tab ->
+                    tabRoutes.forEach { tab ->
                         val selected = backStack?.destination?.hierarchy?.any { it.route == tab.route } == true
                         NavigationBarItem(
                             selected = selected,
@@ -83,6 +86,7 @@ private fun AppNavHost(
             .padding(padding)
     ) {
         composable(Tab.Library.route) { LibraryScreen(nav) }
+        composable(Tab.Recent.route) { RecentScreen(nav) }
         composable(Tab.Sources.route) { SourcesScreen(nav) }
         composable(Tab.Settings.route) { SettingsScreen(nav) }
         composable(

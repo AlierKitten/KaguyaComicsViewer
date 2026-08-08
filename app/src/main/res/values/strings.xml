@@ -1,6 +1,7 @@
 <resources>
-    <string name="app_name">Kaguya 漫画</string>
+    <string name="app_name">KaguyaCV</string>
     <string name="tab_library">漫画库</string>
+    <string name="tab_recent">继续阅读</string>
     <string name="tab_sources">文件源</string>
     <string name="tab_settings">设置</string>
 

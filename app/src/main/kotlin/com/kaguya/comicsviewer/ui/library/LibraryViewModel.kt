@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaguya.comicsviewer.data.repository.ComicRepository
+import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
 import com.kaguya.comicsviewer.domain.usecase.DownloadComicUseCase
@@ -13,6 +14,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -34,6 +37,16 @@ data class ComicRow(
     val progress: Int
 )
 
+data class LoadingProgress(
+    val comicId: Long,
+    val title: String,
+    val state: CacheState,
+    val progressPercent: Int = 0,
+    val downloadedBytes: Long = 0,
+    val totalBytes: Long = 0,
+    val error: String? = null
+)
+
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val repository: ComicRepository,
@@ -45,6 +58,10 @@ class LibraryViewModel @Inject constructor(
     private val query = MutableStateFlow(savedState.get<String>("q").orEmpty())
     private val scanning = MutableStateFlow(false)
     private val sourceIds = repository.observeSources().map { srcs -> srcs.filter { it.enabled }.map { it.id } }
+
+    // 当前正在加载的漫画进度
+    private val _loadingProgress = MutableStateFlow<LoadingProgress?>(null)
+    val loadingProgress: StateFlow<LoadingProgress?> = _loadingProgress.asStateFlow()
 
     // 用 flatMapLatest + combine 为每个 comic 附加 cache + progress
     private val comicsFlow = sourceIds.flatMapLatest { ids ->
@@ -118,15 +135,56 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    fun download(comicId: Long) {
-        Log.d("LibraryViewModel", "download called: comicId=$comicId")
+    /** 开始加载漫画，并追踪进度 */
+    fun startLoading(comicId: Long, title: String) {
+        Log.d("LibraryViewModel", "startLoading: comicId=$comicId, title='$title'")
+        _loadingProgress.value = LoadingProgress(
+            comicId = comicId,
+            title = title,
+            state = CacheState.PENDING
+        )
+
+        // 观察缓存状态变化来更新进度
+        viewModelScope.launch {
+            repository.observeCache(comicId).collectLatest { cache ->
+                val c = cache ?: return@collectLatest
+                Log.d("LibraryViewModel", "cache update: comicId=$comicId, state=${c.state}")
+                _loadingProgress.value = LoadingProgress(
+                    comicId = comicId,
+                    title = title,
+                    state = c.state,
+                    progressPercent = if (c.totalBytes > 0) ((c.downloadedBytes * 100) / c.totalBytes).toInt() else 0,
+                    downloadedBytes = c.downloadedBytes,
+                    totalBytes = c.totalBytes,
+                    error = c.lastError
+                )
+            }
+        }
+
+        // 触发下载
         viewModelScope.launch {
             try {
                 downloadUseCase(comicId)
-                Log.d("LibraryViewModel", "download completed: comicId=$comicId")
+                Log.d("LibraryViewModel", "download scheduled: comicId=$comicId")
             } catch (e: Exception) {
                 Log.e("LibraryViewModel", "download failed: comicId=$comicId", e)
+                _loadingProgress.value = _loadingProgress.value?.copy(
+                    state = CacheState.FAILED,
+                    error = e.message
+                )
             }
+        }
+    }
+
+    /** 关闭加载进度弹窗 */
+    fun dismissLoading() {
+        _loadingProgress.value = null
+    }
+
+    /** 清除所有阅读记录 */
+    fun clearProgress() {
+        viewModelScope.launch {
+            repository.clearAllProgress()
         }
     }
 }

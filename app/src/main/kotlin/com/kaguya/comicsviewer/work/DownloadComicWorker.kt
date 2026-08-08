@@ -56,6 +56,19 @@ class DownloadComicWorker @AssistedInject constructor(
         outFile.parentFile?.mkdirs()
         Log.d(TAG, "doWork: output file = ${outFile.absolutePath}")
 
+        // 标记为下载中
+        repository.upsertCache(
+            ComicCache(
+                comicId = comicId,
+                state = CacheState.DOWNLOADING,
+                archiveFile = outFile.absolutePath,
+                extractedDir = null,
+                totalBytes = -1,
+                downloadedBytes = 0,
+                lastError = null
+            )
+        )
+
         return try {
             when (realSource.type) {
                 ComicSourceType.LOCAL -> {
@@ -125,6 +138,8 @@ class DownloadComicWorker @AssistedInject constructor(
 
     private suspend fun copyFromSaf(fileUri: android.net.Uri, outFile: File) = withContext(Dispatchers.IO) {
         val resolver = applicationContext.contentResolver
+        val comicId = inputData.getLong(WorkParams.COMIC_ID, 0)
+        val title = inputData.getString("title") ?: ""
         var total = -1L
         var copied = 0L
         runCatching {
@@ -148,7 +163,19 @@ class DownloadComicWorker @AssistedInject constructor(
                                 WorkParams.DOWNLOADED_BYTES to copied,
                                 WorkParams.TOTAL_BYTES to total
                             ))
-                            notifications.showProgress(inputData.getLong(WorkParams.COMIC_ID, 0), inputData.getString("title") ?: "", percent, total, copied)
+                            notifications.showProgress(comicId, title, percent, total, copied)
+                            // 更新缓存进度到数据库，让 UI 可以观察到
+                            repository.upsertCache(
+                                ComicCache(
+                                    comicId = comicId,
+                                    state = CacheState.DOWNLOADING,
+                                    archiveFile = outFile.absolutePath,
+                                    extractedDir = null,
+                                    totalBytes = total,
+                                    downloadedBytes = copied,
+                                    lastError = null
+                                )
+                            )
                         }
                     }
                 }
@@ -163,6 +190,7 @@ class DownloadComicWorker @AssistedInject constructor(
         outFile: File,
         title: String
     ) = withContext(Dispatchers.IO) {
+        val comicId = inputData.getLong(WorkParams.COMIC_ID, 0)
         val session = smbClient.open(source)
         try {
             val total = runCatching { smbClient.getFileSize(session, remote) }.getOrDefault(-1L)
@@ -185,7 +213,18 @@ class DownloadComicWorker @AssistedInject constructor(
                                     WorkParams.DOWNLOADED_BYTES to copied,
                                     WorkParams.TOTAL_BYTES to total
                                 ))
-                                notifications.showProgress(inputData.getLong(WorkParams.COMIC_ID, 0), title, percent, total, copied)
+                                notifications.showProgress(comicId, title, percent, total, copied)
+                                repository.upsertCache(
+                                    ComicCache(
+                                        comicId = comicId,
+                                        state = CacheState.DOWNLOADING,
+                                        archiveFile = outFile.absolutePath,
+                                        extractedDir = null,
+                                        totalBytes = total,
+                                        downloadedBytes = copied,
+                                        lastError = null
+                                    )
+                                )
                             }
                         }
                     }

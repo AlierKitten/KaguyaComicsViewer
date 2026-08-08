@@ -36,4 +36,8 @@ interface ComicRepository {
     suspend fun saveProgress(progress: ReadingProgress)
 
     suspend fun listPages(comicId: Long): List<ComicPage>
+
+    suspend fun updatePageCount(comicId: Long, count: Int)
+
+    suspend fun clearAllProgress()
 }

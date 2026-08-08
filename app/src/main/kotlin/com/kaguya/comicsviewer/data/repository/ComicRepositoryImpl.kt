@@ -122,6 +122,14 @@ class ComicRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun updatePageCount(comicId: Long, count: Int) {
+        comicDao.updatePageCount(comicId, count)
+    }
+
+    override suspend fun clearAllProgress() {
+        comicDao.clearAllProgress()
+    }
+
     private fun java.io.File.isImageFile(): Boolean {
         val n = name.lowercase()
         return n.endsWith(".jpg") || n.endsWith(".jpeg") ||
