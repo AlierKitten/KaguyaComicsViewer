@@ -8,6 +8,7 @@ import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
+import com.kaguya.comicsviewer.domain.usecase.CancelDownloadUseCase
 import com.kaguya.comicsviewer.domain.usecase.DownloadComicUseCase
 import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -58,6 +59,7 @@ class LibraryViewModel @Inject constructor(
     private val repository: ComicRepository,
     private val scanUseCase: ScanSourceUseCase,
     private val downloadUseCase: DownloadComicUseCase,
+    private val cancelDownloadUseCase: CancelDownloadUseCase,
     private val settings: SettingsRepository
 ) : ViewModel() {
 
@@ -105,7 +107,15 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private val recentFlow = repository.observeRecent(6).flatMapLatest { comics ->
+    private val recentFlow = combine(
+        repository.observeLoading(),
+        repository.observeRecent(6)
+    ) { loading, recent ->
+        // 加载中的漫画排在前面，合并后去重
+        val loadingIds = loading.map { it.id }.toSet()
+        val merged = loading + recent.filter { it.id !in loadingIds }
+        merged
+    }.flatMapLatest { comics ->
         if (comics.isEmpty()) flowOf(emptyList<ComicRow>())
         else {
             val rowFlows = comics.map { comic ->
@@ -201,6 +211,8 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             repository.observeCache(comicId).collectLatest { cache ->
                 val c = cache ?: return@collectLatest
+                // 已取消或切换到其他漫画，不再更新
+                if (_loadingProgress.value?.comicId != comicId) return@collectLatest
                 Log.d("LibraryViewModel", "cache update: comicId=$comicId, state=${c.state}")
                 _loadingProgress.value = LoadingProgress(
                     comicId = comicId,
@@ -233,6 +245,18 @@ class LibraryViewModel @Inject constructor(
     /** 关闭加载进度弹窗 */
     fun dismissLoading() {
         _loadingProgress.value = null
+    }
+
+    /** 取消加载漫画 */
+    fun cancelLoading(comicId: Long) {
+        viewModelScope.launch {
+            // 先清除进度，让 observeCache 收集器不再覆盖
+            if (_loadingProgress.value?.comicId == comicId) {
+                _loadingProgress.value = null
+            }
+            cancelDownloadUseCase(comicId)
+            repository.deleteCache(comicId)
+        }
     }
 
     /** 清除所有阅读记录 */

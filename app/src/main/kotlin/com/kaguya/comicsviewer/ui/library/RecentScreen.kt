@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
+import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Card
@@ -57,11 +58,35 @@ fun RecentScreen(
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val loadingProgress by viewModel.loadingProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         viewModel.toastEvents.collect { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // 当加载完成(READY)时自动跳转阅读器
+    LaunchedEffect(loadingProgress?.state) {
+        if (loadingProgress?.state == CacheState.READY) {
+            val comicId = loadingProgress!!.comicId
+            viewModel.dismissLoading()
+            nav.navigate("reader/$comicId")
+        }
+    }
+
+    // 加载进度弹窗
+    loadingProgress?.let { lp ->
+        when (lp.state) {
+            CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.DOWNLOADED, CacheState.FAILED -> {
+                LoadingDialog(
+                    progress = lp,
+                    onDismiss = { viewModel.dismissLoading() },
+                    onCancel = { viewModel.cancelLoading(lp.comicId) }
+                )
+            }
+            else -> Unit
         }
     }
 
@@ -93,7 +118,7 @@ fun RecentScreen(
                     Text("没有阅读记录", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "开始阅读后这里会显示进度",
+                        "开始阅读或加载漫画后这里会显示进度",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -106,12 +131,17 @@ fun RecentScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(state.recent, key = { it.comic.id }) { row ->
-                    RecentListItem(row) {
-                        when (row.cache?.state) {
-                            CacheState.READY -> nav.navigate("reader/${row.comic.id}")
-                            else -> viewModel.startLoading(row.comic.id, row.comic.title)
-                        }
-                    }
+                    RecentListItem(row,
+                        onClick = {
+                            when (row.cache?.state) {
+                                CacheState.READY -> nav.navigate("reader/${row.comic.id}")
+                                CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.PENDING, CacheState.DOWNLOADED ->
+                                    viewModel.startLoading(row.comic.id, row.comic.title)
+                                else -> viewModel.startLoading(row.comic.id, row.comic.title)
+                            }
+                        },
+                        onCancel = { viewModel.cancelLoading(row.comic.id) }
+                    )
                 }
             }
         }
@@ -119,7 +149,15 @@ fun RecentScreen(
 }
 
 @Composable
-private fun RecentListItem(row: ComicRow, onClick: () -> Unit) {
+private fun RecentListItem(
+    row: ComicRow,
+    onClick: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val isLoading = row.cache?.state in listOf(
+        CacheState.PENDING, CacheState.DOWNLOADING, CacheState.DOWNLOADED, CacheState.EXTRACTING
+    )
+
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -197,31 +235,62 @@ private fun RecentListItem(row: ComicRow, onClick: () -> Unit) {
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF4CAF50)
                         )
-                        CacheState.DOWNLOADING, CacheState.EXTRACTING -> Text(
-                            "加载中...",
+                        CacheState.DOWNLOADING -> Text(
+                            "下载中 ${if (cache.totalBytes > 0) "${((cache.downloadedBytes * 100) / cache.totalBytes).toInt()}%" else "..."}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
+                        )
+                        CacheState.EXTRACTING -> Text(
+                            "解压中...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        CacheState.DOWNLOADED -> Text(
+                            "已下载，待解压",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        CacheState.PENDING -> Text(
+                            "等待加载",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         CacheState.FAILED -> Text(
                             "加载失败",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
                         )
-                        else -> Text(
-                            "未加载",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                }
+            
+                // 下载进度条
+                row.cache?.let { cache ->
+                    if (cache.state == CacheState.DOWNLOADING && cache.totalBytes > 0) {
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { (cache.downloadedBytes.toFloat() / cache.totalBytes.toFloat()).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(4.dp)
                         )
                     }
                 }
             }
-
-            Icon(
-                Icons.Outlined.PlayArrow,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+            
+            if (isLoading) {
+                IconButton(onClick = onCancel) {
+                    Icon(
+                        Icons.Outlined.Cancel,
+                        contentDescription = "取消加载",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            } else {
+                Icon(
+                    Icons.Outlined.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }

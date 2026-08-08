@@ -57,6 +57,9 @@ class ComicRepositoryImpl @Inject constructor(
     override fun observeRecent(limit: Int): Flow<List<Comic>> =
         comicDao.observeRecent(limit).map { list -> list.map { it.toDomain() } }
 
+    override fun observeLoading(): Flow<List<Comic>> =
+        comicDao.observeLoading().map { list -> list.map { it.toDomain() } }
+
     override suspend fun findComic(id: Long): Comic? = comicDao.findById(id)?.toDomain()
 
     override suspend fun upsertComic(comic: Comic): Long = comicDao.upsertComic(comic.toEntity())

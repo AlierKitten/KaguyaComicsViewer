@@ -20,6 +20,7 @@ interface ComicRepository {
     suspend fun listComicsBySources(sourceIds: List<Long>): List<Comic>
     fun observeComic(id: Long): Flow<Comic?>
     fun observeRecent(limit: Int): Flow<List<Comic>>
+    fun observeLoading(): Flow<List<Comic>>
     suspend fun findComic(id: Long): Comic?
     suspend fun upsertComic(comic: Comic): Long
     suspend fun upsertComics(comics: List<Comic>)

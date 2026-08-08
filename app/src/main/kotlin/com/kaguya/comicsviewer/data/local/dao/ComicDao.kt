@@ -47,6 +47,15 @@ interface ComicDao {
     )
     fun observeRecent(limit: Int): Flow<List<ComicEntity>>
 
+    @Query(
+        """
+        SELECT c.* FROM comics c
+        INNER JOIN comic_cache k ON k.comic_id = c.id
+        WHERE k.state IN ('PENDING', 'DOWNLOADING', 'DOWNLOADED', 'EXTRACTING')
+        """
+    )
+    fun observeLoading(): Flow<List<ComicEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertComic(entity: ComicEntity): Long
 

@@ -27,9 +27,9 @@ local.properties
 .navigation/
 captures/
 
-# Keystore files (uncomment if needed)
-# *.jks
-# *.keystore
+# Keystore files
+*.jks
+*.keystore
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild/

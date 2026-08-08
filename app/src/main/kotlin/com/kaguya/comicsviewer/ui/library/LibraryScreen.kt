@@ -22,8 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ViewAgenda
@@ -99,7 +99,8 @@ fun LibraryScreen(
             CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.DOWNLOADED, CacheState.FAILED -> {
                 LoadingDialog(
                     progress = lp,
-                    onDismiss = { viewModel.dismissLoading() }
+                    onDismiss = { viewModel.dismissLoading() },
+                    onCancel = { viewModel.cancelLoading(lp.comicId) }
                 )
             }
             else -> Unit // PENDING / READY 不弹 dialog
@@ -194,7 +195,11 @@ private fun handleComicClick(
 }
 
 @Composable
-private fun LoadingDialog(progress: LoadingProgress, onDismiss: () -> Unit) {
+fun LoadingDialog(
+    progress: LoadingProgress,
+    onDismiss: () -> Unit,
+    onCancel: () -> Unit = {}
+) {
     val stateText = when (progress.state) {
         CacheState.PENDING -> "准备加载..."
         CacheState.DOWNLOADING, CacheState.EXTRACTING -> "正在加载..."
@@ -249,6 +254,14 @@ private fun LoadingDialog(progress: LoadingProgress, onDismiss: () -> Unit) {
                 TextButton(onClick = onDismiss) { Text("关闭") }
             } else {
                 TextButton(onClick = onDismiss) { Text("后台加载") }
+            }
+        },
+        dismissButton = {
+            if (progress.state == CacheState.DOWNLOADING || progress.state == CacheState.EXTRACTING || progress.state == CacheState.PENDING || progress.state == CacheState.DOWNLOADED) {
+                TextButton(onClick = {
+                    onCancel()
+                    onDismiss()
+                }) { Text("取消加载", color = MaterialTheme.colorScheme.error) }
             }
         }
     )
