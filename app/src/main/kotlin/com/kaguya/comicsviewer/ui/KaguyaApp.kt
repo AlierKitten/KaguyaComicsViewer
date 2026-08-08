@@ -94,7 +94,9 @@ private fun AppNavHost(
             arguments = listOf(androidx.navigation.navArgument("comicId") { type = androidx.navigation.NavType.LongType })
         ) { entry ->
             val id = entry.arguments?.getLong("comicId") ?: 0L
-            ReaderScreen(comicId = id, onBack = { nav.popBackStack() })
+            androidx.compose.runtime.key("reader_$id") {
+                ReaderScreen(comicId = id, onBack = { nav.popBackStack() })
+            }
         }
     }
 }

@@ -87,8 +87,8 @@ fun SettingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
                         ReadingMode.PAGED to "左右翻页",
-                        ReadingMode.CONTINUOUS to "上下滚动",
-                        ReadingMode.WEBTOON to "条带"
+                        ReadingMode.CONTINUOUS to "上下翻页",
+                        ReadingMode.WEBTOON to "条带滚动"
                     ).forEach { (mode, label) ->
                         AssistChip(
                             onClick = { viewModel.setMode(mode) },
@@ -116,6 +116,13 @@ fun SettingsScreen(
             }
 
             SectionCard(title = "存储", icon = Icons.Outlined.CleaningServices) {
+                ToggleRow(
+                    title = "自动生成封面",
+                    subtitle = "加载漫画时自动提取第一页生成缩略图封面",
+                    checked = state.settings.enableCoverGeneration,
+                    onChange = viewModel::setEnableCoverGeneration
+                )
+                Spacer(Modifier.height(12.dp))
                 Text("缓存：${state.cacheSize}", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(12.dp))
                 Button(

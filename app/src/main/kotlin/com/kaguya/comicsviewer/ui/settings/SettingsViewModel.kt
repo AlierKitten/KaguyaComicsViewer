@@ -63,16 +63,37 @@ class SettingsViewModel @Inject constructor(
     }
     fun setDarkMode(enabled: Boolean) = viewModelScope.launch { settings.setDarkMode(enabled) }
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { settings.setDynamicColor(enabled) }
+    fun setEnableCoverGeneration(enabled: Boolean) = viewModelScope.launch { settings.setEnableCoverGeneration(enabled) }
 
     fun clearAllCache() {
         viewModelScope.launch {
             _isClearing.value = true
             try {
                 withContext(Dispatchers.IO) {
+                    // 先通过 DB 记录删除关联文件
                     val caches = repository.listAllCaches()
                     caches.forEach { cache ->
                         Log.d("SettingsVM", "deleting cache for comicId=${cache.comicId}")
                         repository.deleteCache(cache.comicId)
+                    }
+                    // 清理孤立文件：直接清空缓存子目录
+                    cacheDirs.archives.let { dir ->
+                        dir.listFiles()?.forEach { f ->
+                            Log.d("SettingsVM", "cleaning orphan archive: ${f.name}")
+                            f.deleteRecursively()
+                        }
+                    }
+                    cacheDirs.extracted.let { dir ->
+                        dir.listFiles()?.forEach { f ->
+                            Log.d("SettingsVM", "cleaning orphan extracted: ${f.name}")
+                            f.deleteRecursively()
+                        }
+                    }
+                    cacheDirs.covers.let { dir ->
+                        dir.listFiles()?.forEach { f ->
+                            Log.d("SettingsVM", "cleaning orphan cover: ${f.name}")
+                            f.delete()
+                        }
                     }
                 }
                 tick.value = System.currentTimeMillis()

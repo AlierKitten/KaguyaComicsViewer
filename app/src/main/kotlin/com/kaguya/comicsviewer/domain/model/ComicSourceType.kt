@@ -57,7 +57,8 @@ enum class CacheState {
 data class ReadingProgress(
     val comicId: Long,
     val page: Int,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val isFinished: Boolean = false
 )
 
 /** 漫画页的展示模型（来自解压目录）。 */

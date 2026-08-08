@@ -24,7 +24,8 @@ data class AppSettings(
     val followSystemTheme: Boolean = true,
     val darkMode: Boolean = false,
     val dynamicColor: Boolean = true,
-    val libraryDisplayMode: Int = 0
+    val libraryDisplayMode: Int = 0,
+    val enableCoverGeneration: Boolean = true
 )
 
 @Singleton
@@ -38,6 +39,7 @@ class SettingsRepository @Inject constructor(
     private val keyDarkMode = booleanPreferencesKey("dark_mode")
     private val keyDynamicColor = booleanPreferencesKey("dynamic_color")
     private val keyLibraryDisplayMode = intPreferencesKey("library_display_mode")
+    private val keyEnableCoverGeneration = booleanPreferencesKey("enable_cover_generation")
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { prefs ->
         AppSettings(
@@ -48,7 +50,8 @@ class SettingsRepository @Inject constructor(
             followSystemTheme = prefs[keyFollowSystemTheme] ?: true,
             darkMode = prefs[keyDarkMode] ?: false,
             dynamicColor = prefs[keyDynamicColor] ?: true,
-            libraryDisplayMode = prefs[keyLibraryDisplayMode] ?: 0
+            libraryDisplayMode = prefs[keyLibraryDisplayMode] ?: 0,
+            enableCoverGeneration = prefs[keyEnableCoverGeneration] ?: true
         )
     }
 
@@ -78,5 +81,9 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setLibraryDisplayMode(mode: Int) {
         context.dataStore.edit { it[keyLibraryDisplayMode] = mode }
+    }
+
+    suspend fun setEnableCoverGeneration(enabled: Boolean) {
+        context.dataStore.edit { it[keyEnableCoverGeneration] = enabled }
     }
 }

@@ -1,11 +1,14 @@
 package com.kaguya.comicsviewer.work
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.kaguya.comicsviewer.data.prefs.SettingsRepository
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.CacheState
@@ -14,6 +17,8 @@ import com.kaguya.comicsviewer.util.CacheDirectories
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
+import java.io.FileOutputStream
+import kotlinx.coroutines.flow.first
 
 /**
  * 解压 Worker：解压下载好的压缩包到缓存目录，并写封面。
@@ -25,7 +30,8 @@ class ExtractComicWorker @AssistedInject constructor(
     private val repository: ComicRepository,
     private val extractor: ArchiveExtractor,
     private val cacheDirs: CacheDirectories,
-    private val notifications: ComicNotifications
+    private val notifications: ComicNotifications,
+    private val settings: SettingsRepository
 ) : CoroutineWorker(appContext, params) {
 
     companion object {
@@ -106,11 +112,16 @@ class ExtractComicWorker @AssistedInject constructor(
             return Result.failure()
         }
 
-        // 生成封面
-        val coverFile = cacheDirs.coverFile(comicId)
-        runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
-            coverFile.writeBytes(bytes)
-            Log.d(TAG, "doWork: cover written, size=${bytes.size}")
+        // 生成封面缩略图（根据设置）
+        val enableCover = runCatching { settings.settings.first().enableCoverGeneration }.getOrDefault(true)
+        if (enableCover) {
+            val coverFile = cacheDirs.coverFile(comicId)
+            runCatching { extractor.readCover(archive) }.getOrNull()?.let { bytes ->
+                generateThumbnail(bytes, coverFile, maxWidth = 300, quality = 75)
+                Log.d(TAG, "doWork: cover thumbnail written, size=${coverFile.length()}")
+            }
+        } else {
+            Log.d(TAG, "doWork: cover generation disabled, skipping")
         }
 
         // 记录总页数
@@ -132,5 +143,46 @@ class ExtractComicWorker @AssistedInject constructor(
         notifications.showReady(comicId, title)
         Log.d(TAG, "doWork: success, pages=$count")
         return Result.success(workDataOf("extractedDir" to target.absolutePath, "pageCount" to count))
+    }
+
+    /**
+     * 将图片字节数据压缩生成缩略图。
+     */
+    private fun generateThumbnail(
+        imageData: ByteArray,
+        outputFile: File,
+        maxWidth: Int = 300,
+        quality: Int = 75
+    ) {
+        // 先解码获取原始尺寸
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(imageData, 0, imageData.size, options)
+
+        // 计算采样率
+        val sampleSize = calculateSampleSize(options.outWidth, options.outHeight, maxWidth)
+
+        // 解码缩放后的图片
+        val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.size, decodeOptions)
+            ?: return
+
+        // 压缩输出为 JPEG
+        FileOutputStream(outputFile).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        }
+        bitmap.recycle()
+    }
+
+    private fun calculateSampleSize(width: Int, height: Int, targetWidth: Int): Int {
+        var sampleSize = 1
+        if (width > targetWidth) {
+            sampleSize = (width.toFloat() / targetWidth).toInt()
+        }
+        // 确保 sampleSize 是 2 的幂（BitmapFactory 要求）
+        var power = 1
+        while (power * 2 <= sampleSize) {
+            power *= 2
+        }
+        return power.coerceAtLeast(1)
     }
 }

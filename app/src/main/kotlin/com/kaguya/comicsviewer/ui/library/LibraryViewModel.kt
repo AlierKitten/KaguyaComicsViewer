@@ -41,7 +41,8 @@ data class LibraryUiState(
 data class ComicRow(
     val comic: Comic,
     val cache: ComicCache?,
-    val progress: Int
+    val progress: Int,
+    val isFinished: Boolean = false
 )
 
 data class LoadingProgress(
@@ -99,7 +100,7 @@ class LibraryViewModel @Inject constructor(
                         repository.observeCache(comic.id),
                         repository.observeProgress(comic.id)
                     ) { cache, progress ->
-                        ComicRow(comic = comic, cache = cache, progress = progress?.page ?: 0)
+                        ComicRow(comic = comic, cache = cache, progress = progress?.page ?: 0, isFinished = progress?.isFinished ?: false)
                     }
                 }
                 combine(rowFlows) { it.toList() }
@@ -123,7 +124,7 @@ class LibraryViewModel @Inject constructor(
                     repository.observeCache(comic.id),
                     repository.observeProgress(comic.id)
                 ) { cache, progress ->
-                    ComicRow(comic = comic, cache = cache, progress = progress?.page ?: 0)
+                    ComicRow(comic = comic, cache = cache, progress = progress?.page ?: 0, isFinished = progress?.isFinished ?: false)
                 }
             }
             combine(rowFlows) { it.toList() }

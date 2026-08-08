@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -90,7 +91,12 @@ fun ReaderScreen(
                         onPageChange = viewModel::goTo,
                         onTap = { showOverlay = !showOverlay }
                     )
-                    ReadingMode.CONTINUOUS, ReadingMode.WEBTOON -> ContinuousReader(
+                    ReadingMode.CONTINUOUS -> VerticalPagedReader(
+                        state = state,
+                        onPageChange = viewModel::goTo,
+                        onTap = { showOverlay = !showOverlay }
+                    )
+                    ReadingMode.WEBTOON -> ContinuousReader(
                         state = state,
                         onPageChange = viewModel::goTo,
                         onTap = { showOverlay = !showOverlay }
@@ -134,6 +140,38 @@ private fun PagedReader(
     }
 
     HorizontalPager(
+        state = pagerState,
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { onTap() })
+            }
+    ) { pageIndex ->
+        PageView(state.pages[pageIndex].path)
+    }
+}
+
+@Composable
+private fun VerticalPagedReader(
+    state: ReaderUiState,
+    onPageChange: (Int) -> Unit,
+    onTap: () -> Unit
+) {
+    if (state.pages.isEmpty()) {
+        EmptyState()
+        return
+    }
+    val pagerState = rememberPagerState(
+        initialPage = state.page.coerceIn(0, state.pages.size - 1)
+    ) { state.pages.size }
+
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.distinctUntilChanged().collect { p ->
+            onPageChange(p)
+        }
+    }
+
+    VerticalPager(
         state = pagerState,
         modifier = Modifier
             .fillMaxSize()

@@ -74,7 +74,9 @@ class ReaderViewModel @Inject constructor(
         val max = (_state.value.pages.size - 1).coerceAtLeast(0)
         val page = p.coerceIn(0, max)
         _state.value = _state.value.copy(page = page)
-        viewModelScope.launch { saveProgress(comicId, page) }
+        // 读取到最后一页或倒数第二页都算已读完
+        val isFinished = page >= (max - 1).coerceAtLeast(0) && max > 0
+        viewModelScope.launch { saveProgress(comicId, page, isFinished) }
     }
 
     fun next() = goTo(_state.value.page + 1)

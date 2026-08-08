@@ -84,11 +84,13 @@ fun ComicCache.toEntity(comicId: Long): ComicCacheEntity = ComicCacheEntity(
 fun ReadingProgressEntity.toDomain(): ReadingProgress = ReadingProgress(
     comicId = comicId,
     page = page,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
+    isFinished = isFinished
 )
 
 fun ReadingProgress.toEntity(): ReadingProgressEntity = ReadingProgressEntity(
     comicId = comicId,
     page = page,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
+    isFinished = isFinished
 )

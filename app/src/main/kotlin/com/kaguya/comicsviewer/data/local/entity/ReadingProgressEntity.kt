@@ -22,5 +22,6 @@ data class ReadingProgressEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @ColumnInfo(name = "comic_id") val comicId: Long,
     @ColumnInfo(name = "page") val page: Int,
-    @ColumnInfo(name = "updated_at") val updatedAt: Long
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    @ColumnInfo(name = "is_finished") val isFinished: Boolean = false
 )

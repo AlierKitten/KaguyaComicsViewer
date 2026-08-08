@@ -209,17 +209,27 @@ private fun RecentListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    "已读 ${row.progress + 1} / ${row.comic.pageCount.takeIf { it > 0 } ?: "?"} 页",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (row.isFinished) {
+                    Text(
+                        "已读完",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF4CAF50),
+                        fontWeight = FontWeight.Medium
+                    )
+                } else {
+                    Text(
+                        "已读 ${row.progress + 1} / ${row.comic.pageCount.takeIf { it > 0 } ?: "?"} 页",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
-                if (row.progress > 0) {
+                if (row.progress > 0 || row.isFinished) {
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = {
-                            (row.progress.toFloat() / (row.comic.pageCount.takeIf { it > 0 } ?: 1))
+                            if (row.isFinished) 1f
+                            else (row.progress.toFloat() / (row.comic.pageCount.takeIf { it > 0 } ?: 1))
                                 .coerceIn(0f, 1f)
                         },
                         modifier = Modifier.fillMaxWidth().height(4.dp)
