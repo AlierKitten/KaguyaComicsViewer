@@ -1,21 +1,11 @@
 package com.kaguya.comicsviewer.data.prefs
 
-import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.kaguya.comicsviewer.domain.model.ReadingMode
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import com.tencent.mmkv.MMKV
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 data class AppSettings(
     val readingMode: ReadingMode,
@@ -29,61 +19,75 @@ data class AppSettings(
 )
 
 @Singleton
-class SettingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
-    private val keyReadingMode = stringPreferencesKey("reading_mode")
-    private val keyKeepScreenOn = booleanPreferencesKey("keep_screen_on")
-    private val keyAutoMarkRead = booleanPreferencesKey("auto_mark_read")
-    private val keyFollowSystemTheme = booleanPreferencesKey("follow_system_theme")
-    private val keyDarkMode = booleanPreferencesKey("dark_mode")
-    private val keyDynamicColor = booleanPreferencesKey("dynamic_color")
-    private val keyLibraryDisplayMode = intPreferencesKey("library_display_mode")
-    private val keyShowCovers = booleanPreferencesKey("show_covers")
+class SettingsRepository @Inject constructor() {
 
-    val settings: Flow<AppSettings> = context.dataStore.data.map { prefs ->
-        AppSettings(
-            readingMode = prefs[keyReadingMode]?.let { runCatching { ReadingMode.valueOf(it) }.getOrNull() }
-                ?: ReadingMode.PAGED,
-            keepScreenOn = prefs[keyKeepScreenOn] ?: true,
-            autoMarkRead = prefs[keyAutoMarkRead] ?: false,
-            followSystemTheme = prefs[keyFollowSystemTheme] ?: true,
-            darkMode = prefs[keyDarkMode] ?: false,
-            dynamicColor = prefs[keyDynamicColor] ?: true,
-            libraryDisplayMode = prefs[keyLibraryDisplayMode] ?: 0,
-            showCovers = prefs[keyShowCovers] ?: true
-        )
+    private val kv: MMKV = MMKV.defaultMMKV()
+
+    private val keyReadingMode = "reading_mode"
+    private val keyKeepScreenOn = "keep_screen_on"
+    private val keyAutoMarkRead = "auto_mark_read"
+    private val keyFollowSystemTheme = "follow_system_theme"
+    private val keyDarkMode = "dark_mode"
+    private val keyDynamicColor = "dynamic_color"
+    private val keyLibraryDisplayMode = "library_display_mode"
+    private val keyShowCovers = "show_covers"
+
+    private fun readSettings(): AppSettings = AppSettings(
+        readingMode = kv.decodeString(keyReadingMode)?.let { runCatching { ReadingMode.valueOf(it) }.getOrNull() }
+            ?: ReadingMode.PAGED,
+        keepScreenOn = kv.decodeBool(keyKeepScreenOn, true),
+        autoMarkRead = kv.decodeBool(keyAutoMarkRead, false),
+        followSystemTheme = kv.decodeBool(keyFollowSystemTheme, true),
+        darkMode = kv.decodeBool(keyDarkMode, false),
+        dynamicColor = kv.decodeBool(keyDynamicColor, true),
+        libraryDisplayMode = kv.decodeInt(keyLibraryDisplayMode, 0),
+        showCovers = kv.decodeBool(keyShowCovers, true)
+    )
+
+    private val _settings = MutableStateFlow(readSettings())
+    val settings: StateFlow<AppSettings> = _settings
+
+    private fun emit() {
+        _settings.value = readSettings()
     }
 
-    suspend fun setReadingMode(mode: ReadingMode) {
-        context.dataStore.edit { it[keyReadingMode] = mode.name }
+    fun setReadingMode(mode: ReadingMode) {
+        kv.encode(keyReadingMode, mode.name)
+        emit()
     }
 
-    suspend fun setKeepScreenOn(enabled: Boolean) {
-        context.dataStore.edit { it[keyKeepScreenOn] = enabled }
+    fun setKeepScreenOn(enabled: Boolean) {
+        kv.encode(keyKeepScreenOn, enabled)
+        emit()
     }
 
-    suspend fun setAutoMarkRead(enabled: Boolean) {
-        context.dataStore.edit { it[keyAutoMarkRead] = enabled }
+    fun setAutoMarkRead(enabled: Boolean) {
+        kv.encode(keyAutoMarkRead, enabled)
+        emit()
     }
 
-    suspend fun setFollowSystemTheme(enabled: Boolean) {
-        context.dataStore.edit { it[keyFollowSystemTheme] = enabled }
+    fun setFollowSystemTheme(enabled: Boolean) {
+        kv.encode(keyFollowSystemTheme, enabled)
+        emit()
     }
 
-    suspend fun setDarkMode(enabled: Boolean) {
-        context.dataStore.edit { it[keyDarkMode] = enabled }
+    fun setDarkMode(enabled: Boolean) {
+        kv.encode(keyDarkMode, enabled)
+        emit()
     }
 
-    suspend fun setDynamicColor(enabled: Boolean) {
-        context.dataStore.edit { it[keyDynamicColor] = enabled }
+    fun setDynamicColor(enabled: Boolean) {
+        kv.encode(keyDynamicColor, enabled)
+        emit()
     }
 
-    suspend fun setLibraryDisplayMode(mode: Int) {
-        context.dataStore.edit { it[keyLibraryDisplayMode] = mode }
+    fun setLibraryDisplayMode(mode: Int) {
+        kv.encode(keyLibraryDisplayMode, mode)
+        emit()
     }
 
-    suspend fun setShowCovers(enabled: Boolean) {
-        context.dataStore.edit { it[keyShowCovers] = enabled }
+    fun setShowCovers(enabled: Boolean) {
+        kv.encode(keyShowCovers, enabled)
+        emit()
     }
 }

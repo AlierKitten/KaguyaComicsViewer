@@ -19,13 +19,16 @@ data class DiscoveredComic(
     val title: String,
     val relativePath: String,
     val absoluteUri: String,
-    val sizeBytes: Long
+    val sizeBytes: Long = 0
 )
 
 /** 扫描器抽象。 */
 interface ComicScanner {
-    /** 扫描一个源，得到所有发现的漫画。 */
+    /** 快速扫描一个源，只返回漫画名和路径（不含文件大小）。 */
     suspend fun scan(source: ComicSource): List<DiscoveredComic>
+
+    /** 批量获取文件大小，返回 relativePath → sizeBytes 映射。 */
+    suspend fun fetchSizes(source: ComicSource, comics: List<DiscoveredComic>): Map<String, Long>
 
     /** 计算缩略图（封面）字节。 */
     suspend fun cover(source: ComicSource, discovered: DiscoveredComic): ByteArray?
@@ -42,32 +45,68 @@ class LocalFileScanner @Inject constructor(
         val treeUri = source.localUri ?: return@withContext emptyList()
         val root = DocumentFile.fromTreeUri(context, android.net.Uri.parse(treeUri)) ?: return@withContext emptyList()
         val results = mutableListOf<DiscoveredComic>()
-        walk(root, source.name, "", results)
+        walk(root, "", results)
         results
     }
 
-    private fun walk(dir: DocumentFile, sourceName: String, prefix: String, out: MutableList<DiscoveredComic>) {
+    private fun walk(dir: DocumentFile, prefix: String, out: MutableList<DiscoveredComic>) {
         for (file in dir.listFiles()) {
             val name = file.name ?: continue
             if (file.isDirectory) {
-                walk(file, sourceName, if (prefix.isEmpty()) name else "$prefix/$name", out)
+                walk(file, if (prefix.isEmpty()) name else "$prefix/$name", out)
             } else {
                 if (extractor.detectType(name) == null) continue
                 val relative = if (prefix.isEmpty()) name else "$prefix/$name"
-                val size = FileDescriptorCompat.length(context, file)
                 out += DiscoveredComic(
                     title = name.substringBeforeLast('.'),
                     relativePath = relative,
-                    absoluteUri = file.uri.toString(),
-                    sizeBytes = size
+                    absoluteUri = file.uri.toString()
                 )
             }
         }
     }
 
+    override suspend fun fetchSizes(source: ComicSource, comics: List<DiscoveredComic>): Map<String, Long> = withContext(Dispatchers.IO) {
+        val treeUri = source.localUri ?: return@withContext emptyMap()
+        val root = DocumentFile.fromTreeUri(context, android.net.Uri.parse(treeUri)) ?: return@withContext emptyMap()
+        val result = mutableMapOf<String, Long>()
+        for (comic in comics) {
+            val parts = comic.relativePath.split('/').filter { it.isNotBlank() }
+            var cur: DocumentFile? = root
+            for (p in parts) {
+                cur = cur?.listFiles()?.firstOrNull { it.name == p } ?: break
+            }
+            val file = cur
+            if (file != null && file.isFile) {
+                result[comic.relativePath] = FileDescriptorCompat.length(context, file)
+            }
+        }
+        result
+    }
+
     override suspend fun cover(source: ComicSource, discovered: DiscoveredComic): ByteArray? = withContext(Dispatchers.IO) {
-        // 封面由 Worker 在解压阶段写入，扫描阶段返回 null。
-        null
+        val treeUri = source.localUri ?: return@withContext null
+        val root = DocumentFile.fromTreeUri(context, android.net.Uri.parse(treeUri)) ?: return@withContext null
+        val parts = discovered.relativePath.split('/').filter { it.isNotBlank() }
+        var cur: DocumentFile? = root
+        for (p in parts) {
+            cur = cur?.listFiles()?.firstOrNull { it.name == p } ?: return@withContext null
+        }
+        val file = cur ?: return@withContext null
+        val fileName = discovered.relativePath.substringAfterLast('/')
+        val tempFile = java.io.File.createTempFile("cover_local_", ".tmp")
+        try {
+            context.contentResolver.openInputStream(file.uri)?.use { input ->
+                java.io.FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return@withContext null
+            extractor.readCover(tempFile, fileName)
+        } catch (e: Exception) {
+            null
+        } finally {
+            tempFile.delete()
+        }
     }
 }
 

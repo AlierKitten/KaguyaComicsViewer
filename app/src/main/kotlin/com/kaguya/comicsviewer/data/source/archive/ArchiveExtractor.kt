@@ -1,5 +1,7 @@
 package com.kaguya.comicsviewer.data.source.archive
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.github.junrar.Archive
 import com.github.junrar.rarfile.FileHeader
 import kotlinx.coroutines.Dispatchers
@@ -7,6 +9,7 @@ import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.ArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
 import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -162,15 +165,61 @@ class ArchiveExtractor @Inject constructor() {
             }
         }
 
-    /** 读取第一张图片作为封面源（不落盘，只返回字节）。 */
+    /** 读取第一张图片作为封面（流式解码 + 缩放，避免 OOM）。 */
     suspend fun readCover(archive: File): ByteArray? = withContext(Dispatchers.IO) {
-        val entries = listImageEntries(archive)
-        if (entries.isEmpty()) return@withContext null
-        readEntry(archive, entries.first())
+        decodeCoverBitmap(archive, archive.name)
+    }
+
+    /** 读取第一张图片作为封面。[fileName] 用于检测压缩包类型（当 [archive] 是临时文件时扩展名可能不正确）。 */
+    suspend fun readCover(archive: File, fileName: String): ByteArray? = withContext(Dispatchers.IO) {
+        decodeCoverBitmap(archive, fileName)
     }
 
     suspend fun readEntry(archive: File, entryName: String): ByteArray? = withContext(Dispatchers.IO) {
-        val type = detectType(archive.name) ?: return@withContext null
+        readEntryInternal(archive, entryName, archive.name)
+    }
+
+    private suspend fun listImageEntriesInternal(archive: File, fileName: String): List<String> = withContext(Dispatchers.IO) {
+        val type = detectType(fileName) ?: return@withContext emptyList()
+        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
+        when (type) {
+            ArchiveType.ZIP -> {
+                val names = mutableListOf<String>()
+                archive.inputStream().use { input ->
+                    BufferedInputStream(input).use { buffered ->
+                        ZipArchiveInputStream(buffered).use { zip ->
+                            while (true) {
+                                val entry = zip.nextEntry ?: break
+                                if (entry.isDirectory) continue
+                                val name = entry.name.substringAfterLast('/')
+                                if (imageExts.any { name.lowercase().endsWith(".$it") }) {
+                                    names += entry.name
+                                }
+                            }
+                        }
+                    }
+                }
+                names
+            }
+            ArchiveType.RAR -> {
+                val names = mutableListOf<String>()
+                Archive(archive).use { a ->
+                    for (header in a.fileHeaders) {
+                        if (header.isDirectory) continue
+                        val fn = header.getFileNameString()
+                        val name = fn.substringAfterLast('/')
+                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
+                            names += fn
+                        }
+                    }
+                }
+                names
+            }
+        }.sortedWith(NATURAL_ORDER)
+    }
+
+    private suspend fun readEntryInternal(archive: File, entryName: String, fileName: String): ByteArray? = withContext(Dispatchers.IO) {
+        val type = detectType(fileName) ?: return@withContext null
         when (type) {
             ArchiveType.ZIP -> {
                 archive.inputStream().use { input ->
@@ -201,6 +250,80 @@ class ArchiveExtractor @Inject constructor() {
                 }
                 result
             }
+        }
+    }
+
+    /**
+     * 流式解码封面：将第一张图片条目写入临时文件，再用 BitmapFactory + inSampleSize 解码，
+     * 最后压缩为 JPEG。避免将整张原图加载到内存。
+     */
+    private fun decodeCoverBitmap(archive: File, fileName: String): ByteArray? {
+        val type = detectType(fileName) ?: return null
+        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
+        val tempImg = File.createTempFile("cover_img_", ".tmp")
+        try {
+            // 将第一张图片条目写入临时文件
+            val found = when (type) {
+                ArchiveType.ZIP -> {
+                    var found = false
+                    archive.inputStream().use { input ->
+                        BufferedInputStream(input, 256 * 1024).use { buffered ->
+                            ZipArchiveInputStream(buffered).use { zip ->
+                                while (!found) {
+                                    val entry = zip.nextEntry ?: break
+                                    if (entry.isDirectory) continue
+                                    val name = entry.name.substringAfterLast('/')
+                                    if (imageExts.any { name.lowercase().endsWith(".$it") }) {
+                                        FileOutputStream(tempImg).use { out -> zip.copyTo(out) }
+                                        found = true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    found
+                }
+                ArchiveType.RAR -> {
+                    var ok = false
+                    Archive(archive).use { a ->
+                        for (header in a.fileHeaders as List<FileHeader>) {
+                            if (header.isDirectory) continue
+                            val fn = header.getFileNameString()
+                            val name = fn.substringAfterLast('/')
+                            if (imageExts.any { name.lowercase().endsWith(".$it") }) {
+                                FileOutputStream(tempImg).use { out -> a.extractFile(header, out) }
+                                ok = true
+                                break
+                            }
+                        }
+                    }
+                    ok
+                }
+            }
+            if (!found) return null
+
+            // 先解码边界
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(tempImg.absolutePath, opts)
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+
+            // 计算 inSampleSize，目标最长边 480px
+            val targetSize = 480
+            val maxDim = maxOf(opts.outWidth, opts.outHeight)
+            opts.inSampleSize = if (maxDim > targetSize) maxDim / targetSize else 1
+            opts.inJustDecodeBounds = false
+
+            val bitmap = BitmapFactory.decodeFile(tempImg.absolutePath, opts) ?: return null
+
+            // 压缩为 JPEG
+            val baos = ByteArrayOutputStream(64 * 1024)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+            bitmap.recycle()
+            return baos.toByteArray()
+        } catch (e: Exception) {
+            return null
+        } finally {
+            tempImg.delete()
         }
     }
 

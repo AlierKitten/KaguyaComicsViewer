@@ -168,8 +168,11 @@ class LibraryViewModel @Inject constructor(
                 var totalFound = 0
                 for (s in sources) {
                     try {
-                        val count = scanUseCase(s)
-                        totalFound += count
+                        val count = scanUseCase(
+                            s,
+                            onPhase1 = { n -> totalFound += n },
+                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") }
+                        )
                     } catch (e: Exception) {
                         Log.e("LibraryViewModel", "scan failed for ${s.name}", e)
                         _toastEvents.tryEmit("扫描失败：${s.name} - ${e.message}")
@@ -191,10 +194,14 @@ class LibraryViewModel @Inject constructor(
                 val sources = repository.listEnabledSources()
                 val source = sources.firstOrNull { it.id == sourceId }
                 if (source != null) {
-                    val count = scanUseCase(source)
-                    if (count == 0) {
-                        _toastEvents.tryEmit("未发现漫画文件")
-                    }
+                    val count = scanUseCase(
+                        source,
+                        onPhase1 = { n ->
+                            if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
+                            else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
+                        },
+                        onPhase2 = { msg -> _toastEvents.tryEmit(msg) }
+                    )
                 }
             } catch (e: Exception) {
                 Log.e("LibraryViewModel", "scanSource failed", e)

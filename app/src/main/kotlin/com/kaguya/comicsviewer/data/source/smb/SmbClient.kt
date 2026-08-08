@@ -1,6 +1,8 @@
 package com.kaguya.comicsviewer.data.source.smb
 
 import android.util.Log
+import com.kaguya.comicsviewer.data.source.DiscoveredComic
+import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import jcifs.CIFSContext
 import jcifs.CIFSException
@@ -11,28 +13,35 @@ import jcifs.smb.SmbFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.io.File
 import java.util.Properties
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SmbClient @Inject constructor() {
+class SmbClient @Inject constructor(
+    private val extractor: ArchiveExtractor
+) {
 
     companion object {
         private const val TAG = "SmbClient"
         private const val SMB_TIMEOUT_MS = 10_000L
+        private const val COPY_BUF = 256 * 1024  // 256KB copy buffer
     }
 
     private fun createProps(): Properties = Properties().apply {
         setProperty("jcifs.smb.client.disablePlainTextPasswords", "false")
         setProperty("jcifs.smb.client.minVersion", "SMB202")
         setProperty("jcifs.smb.client.maxVersion", "SMB311")
-        setProperty("jcifs.smb.client.responseTimeout", "10000")
-        setProperty("jcifs.smb.client.soTimeout", "10000")
+        setProperty("jcifs.smb.client.responseTimeout", "30000")
+        setProperty("jcifs.smb.client.soTimeout", "30000")
         setProperty("jcifs.smb.client.connTimeout", "10000")
         setProperty("jcifs.smb.client.dfs.disabled", "true")
-        setProperty("jcifs.netbios.cachePolicy", "0")
-        setProperty("jcifs.smb.client.useBatching", "false")
+        setProperty("jcifs.netbios.cachePolicy", "1200")
+        // 性能优化：启用 batching + 增大接收缓冲区
+        setProperty("jcifs.smb.client.useBatching", "true")
+        setProperty("jcifs.smb.client.rcv_buf_size", "655360")
+        setProperty("jcifs.smb.client.bufDataSize", "65536")
     }
 
     private fun createCtx(host: String, port: Int, username: String, password: String): CIFSContext {
@@ -126,9 +135,9 @@ class SmbClient @Inject constructor() {
         }
     }
 
-    /** 扫描漫画文件 */
-    suspend fun scanRecursive(source: ComicSource, path: String?): List<String> = withContext(Dispatchers.IO) {
-        withTimeout(SMB_TIMEOUT_MS * 6) { // 扫描给 60 秒超时
+    /** 快速扫描漫画文件，只返回路径不含文件大小。 */
+    suspend fun scanRecursive(source: ComicSource, path: String?): List<DiscoveredComic> = withContext(Dispatchers.IO) {
+        withTimeout(SMB_TIMEOUT_MS * 6) {
             val ctx = createContext(source)
             val share = source.share?.ifBlank { null } ?: error("share missing")
             val hostStr = source.host ?: error("host missing")
@@ -137,11 +146,17 @@ class SmbClient @Inject constructor() {
             Log.d(TAG, "scanRecursive: scanning $url")
             val root = SmbFile(url, ctx)
             val result = mutableListOf<String>()
-            // 构建 URL 前缀用于计算相对路径
             val urlPrefix = "smb://${hostStr.substringBefore(':')}:$port/$share/"
             collectArchives(root, result, urlPrefix)
             Log.d(TAG, "scanRecursive: found ${result.size} archives")
-            result
+            result.map { relPath ->
+                val fileName = relPath.substringAfterLast('/')
+                DiscoveredComic(
+                    title = fileName.substringBeforeLast('.'),
+                    relativePath = relPath,
+                    absoluteUri = relPath
+                )
+            }
         }
     }
 
@@ -177,6 +192,22 @@ class SmbClient @Inject constructor() {
         }
     }
 
+    /** 批量获取文件大小 */
+    suspend fun fetchSizes(source: ComicSource, relativePaths: List<String>): Map<String, Long> = withContext(Dispatchers.IO) {
+        val ctx = createContext(source)
+        val share = source.share?.ifBlank { null } ?: error("share missing")
+        val hostStr = source.host ?: error("host missing")
+        val result = mutableMapOf<String, Long>()
+        for (relPath in relativePaths) {
+            val url = buildSmbUrl(hostStr, share, null) + relPath.trimStart('/')
+            val size = runCatching {
+                withTimeout(SMB_TIMEOUT_MS) { SmbFile(url, ctx).length() }
+            }.getOrDefault(0L)
+            result[relPath] = size
+        }
+        result
+    }
+
     /** 获取文件大小 */
     suspend fun getFileSize(source: ComicSource, remotePath: String): Long = withContext(Dispatchers.IO) {
         val ctx = createContext(source)
@@ -185,12 +216,45 @@ class SmbClient @Inject constructor() {
         runCatching { SmbFile(url, ctx).length() }.getOrDefault(-1L)
     }
 
-    /** 打开输入流读取远程文件 */
+    /** 从远程压缩包读取封面图片字节。 */
+    suspend fun readCover(source: ComicSource, remotePath: String): ByteArray? = withContext(Dispatchers.IO) {
+        val ctx = createContext(source)
+        val share = source.share?.ifBlank { null } ?: error("share missing")
+        val hostStr = source.host ?: error("host missing")
+        val url = buildSmbUrl(hostStr, share, null) + remotePath.trimStart('/')
+        Log.d(TAG, "readCover: downloading for cover extraction: $url")
+        val smbFile = SmbFile(url, ctx)
+        val fileName = remotePath.substringAfterLast('/')
+        val tempFile = File.createTempFile("cover_extract_", ".tmp")
+        try {
+            smbFile.inputStream.use { input ->
+                java.io.BufferedInputStream(input, COPY_BUF).use { buffered ->
+                    java.io.FileOutputStream(tempFile).use { output ->
+                        val buf = ByteArray(COPY_BUF)
+                        var n: Int
+                        while (buffered.read(buf).also { n = it } != -1) {
+                            output.write(buf, 0, n)
+                        }
+                    }
+                }
+            }
+            val cover = extractor.readCover(tempFile, fileName)
+            Log.d(TAG, "readCover: ${if (cover != null) "success" else "no cover found"}")
+            cover
+        } catch (e: Exception) {
+            Log.w(TAG, "readCover: failed for $url: ${e.message}")
+            null
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    /** 打开输入流读取远程文件（带 256KB 缓冲） */
     suspend fun readFile(source: ComicSource, remotePath: String, block: suspend (java.io.InputStream) -> Unit) = withContext(Dispatchers.IO) {
         val ctx = createContext(source)
         val share = source.share?.ifBlank { null } ?: error("share missing")
         val url = buildSmbUrl(source.host ?: error("host missing"), share, null) + remotePath.trimStart('/')
         val file = SmbFile(url, ctx)
-        file.inputStream.use { block(it) }
+        java.io.BufferedInputStream(file.inputStream, COPY_BUF).use { block(it) }
     }
 }

@@ -158,7 +158,7 @@ class DownloadComicWorker @AssistedInject constructor(
         }
         resolver.openInputStream(fileUri)?.use { input ->
             FileOutputStream(outFile).use { out ->
-                val buf = ByteArray(128 * 1024)
+                val buf = ByteArray(256 * 1024)
                 var lastPercent = -1
                 while (true) {
                     val n = input.read(buf)
@@ -210,7 +210,7 @@ class DownloadComicWorker @AssistedInject constructor(
         smbClient.readFile(source, remote) { input ->
             Log.d(TAG, "downloadFromSmb: inputStream opened, starting copy")
             FileOutputStream(outFile).use { out ->
-                val buf = ByteArray(128 * 1024)
+                val buf = ByteArray(256 * 1024)
                 while (true) {
                     val n = input.read(buf)
                     if (n <= 0) break

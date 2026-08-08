@@ -14,6 +14,7 @@ room = "2.6.1"
 workManager = "2.10.0"
 coil = "2.7.0"
 datastore = "1.1.1"
+mmkv = "2.2.4"
 jcifsng = "2.1.10"
 commonsCompress = "1.26.2"
 junrar = "7.5.5"
@@ -62,8 +63,11 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 coil-gif = { group = "io.coil-kt", name = "coil-gif", version.ref = "coil" }
 coil-svg = { group = "io.coil-kt", name = "coil-svg", version.ref = "coil" }
 
-# DataStore
-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+# DataStore (保留但不再使用，可安全移除)
+# datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+# MMKV
+mmkv = { group = "com.tencent", name = "mmkv", version.ref = "mmkv" }
 
 # SMB (jcifs-ng)
 jcifsng = { group = "eu.agno3.jcifs", name = "jcifs-ng", version.ref = "jcifsng" }

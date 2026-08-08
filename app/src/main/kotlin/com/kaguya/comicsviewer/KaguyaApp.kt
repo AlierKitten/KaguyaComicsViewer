@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.kaguya.comicsviewer.notification.NotificationChannels
+import com.tencent.mmkv.MMKV
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
 import java.io.PrintWriter
@@ -44,6 +45,8 @@ class KaguyaApp : Application(), Configuration.Provider {
         }
 
         Log.d("KaguyaApp", "App onCreate started")
+        val mmkvDir = MMKV.initialize(this)
+        Log.d("KaguyaApp", "MMKV initialized, dir=$mmkvDir")
         notificationChannels.ensureCreated()
         Log.d("KaguyaApp", "Notification channels created")
     }

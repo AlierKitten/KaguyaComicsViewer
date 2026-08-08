@@ -14,11 +14,14 @@ android {
         applicationId = "com.kaguya.comicsviewer"
         minSdk = 29
         targetSdk = 37
-        versionCode = 226080913
-        versionName = "1.3.3"
+        versionCode = 226080914
+        versionName = "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -119,8 +122,8 @@ dependencies {
     implementation(libs.coil.gif)
     implementation(libs.coil.svg)
 
-    // DataStore
-    implementation(libs.datastore.preferences)
+    // MMKV
+    implementation(libs.mmkv)
 
     // SMB (jcifs-ng)
     implementation(libs.jcifsng)
