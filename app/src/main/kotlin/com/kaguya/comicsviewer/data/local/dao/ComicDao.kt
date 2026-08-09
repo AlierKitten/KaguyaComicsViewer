@@ -25,6 +25,17 @@ interface ComicDao {
     )
     fun observeBySources(sourceIds: List<Long>): Flow<List<ComicEntity>>
 
+    @Query(
+        """
+        SELECT c.* FROM comics c
+        LEFT JOIN comic_cache k ON k.comic_id = c.id
+        LEFT JOIN reading_progress p ON p.comic_id = c.id
+        GROUP BY c.id
+        ORDER BY c.title COLLATE NOCASE
+        """
+    )
+    fun observeAll(): Flow<List<ComicEntity>>
+
     @Query("SELECT * FROM comics WHERE id = :id")
     fun observeById(id: Long): Flow<ComicEntity?>
 

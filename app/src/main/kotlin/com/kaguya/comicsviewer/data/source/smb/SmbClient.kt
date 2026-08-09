@@ -216,37 +216,42 @@ class SmbClient @Inject constructor(
         runCatching { SmbFile(url, ctx).length() }.getOrDefault(-1L)
     }
 
-    /** 从远程压缩包读取封面图片字节。 */
+    /** 从远程压缩包读取封面图片字节（流式，边下载边解，ZIP/CBZ 无需落盘整包）。 */
     suspend fun readCover(source: ComicSource, remotePath: String): ByteArray? = withContext(Dispatchers.IO) {
-        val ctx = createContext(source)
         val share = source.share?.ifBlank { null } ?: error("share missing")
         val hostStr = source.host ?: error("host missing")
         val url = buildSmbUrl(hostStr, share, null) + remotePath.trimStart('/')
-        Log.d(TAG, "readCover: downloading for cover extraction: $url")
-        val smbFile = SmbFile(url, ctx)
         val fileName = remotePath.substringAfterLast('/')
-        val tempFile = File.createTempFile("cover_extract_", ".tmp")
-        try {
-            smbFile.inputStream.use { input ->
-                java.io.BufferedInputStream(input, COPY_BUF).use { buffered ->
-                    java.io.FileOutputStream(tempFile).use { output ->
-                        val buf = ByteArray(COPY_BUF)
-                        var n: Int
-                        while (buffered.read(buf).also { n = it } != -1) {
-                            output.write(buf, 0, n)
-                        }
+        // SMB 共享对单账户有连接数上限，批量扫描时密集开关连接可能触发瞬时上限，这里轻量重试
+        repeat(3) { attempt ->
+            try {
+                val ctx = createContext(source)
+                val smbFile = SmbFile(url, ctx)
+                val input = java.io.BufferedInputStream(smbFile.inputStream, COPY_BUF)
+                val cover = extractor.readCoverFromStream(input, fileName) { stream ->
+                    // RAR 需要随机访问，回退到落盘临时文件后解码
+                    val tempFile = File.createTempFile("cover_extract_", ".tmp")
+                    try {
+                        java.io.FileOutputStream(tempFile).use { out -> stream.copyTo(out) }
+                        extractor.readCover(tempFile, fileName)
+                    } catch (e: Exception) {
+                        null
+                    } finally {
+                        tempFile.delete()
                     }
                 }
+                if (cover != null) Log.d(TAG, "readCover: success for $url")
+                return@withContext cover
+            } catch (e: Exception) {
+                if (attempt < 2) {
+                    Log.w(TAG, "readCover: attempt ${attempt + 1} failed for $url: ${e.message}, retrying...")
+                    kotlinx.coroutines.delay(800L * (attempt + 1))
+                } else {
+                    Log.w(TAG, "readCover: failed for $url: ${e.message}")
+                }
             }
-            val cover = extractor.readCover(tempFile, fileName)
-            Log.d(TAG, "readCover: ${if (cover != null) "success" else "no cover found"}")
-            cover
-        } catch (e: Exception) {
-            Log.w(TAG, "readCover: failed for $url: ${e.message}")
-            null
-        } finally {
-            tempFile.delete()
         }
+        null
     }
 
     /** 打开输入流读取远程文件（带 256KB 缓冲） */

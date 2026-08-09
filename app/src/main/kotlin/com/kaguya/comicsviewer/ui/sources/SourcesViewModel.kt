@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,11 +42,17 @@ class SourcesViewModel @Inject constructor(
     val scanningIds: StateFlow<Set<Long>> = _scanningIds.asStateFlow()
 
     // 每个源的漫画数量
+    // 同 LibraryViewModel：comics.source_id 是 comic_sources 外键，toggle enabled 会让
+    // observeComicCountBySources 因 Room 失效重查并瞬间返回空 map；flatMapLatest 收到空
+    // 会卡在 0。用 scan 保留上一次非空快照，避免瞬时空击穿 UI。
     private val comicCounts = repository.observeSources()
         .map { list -> list.map { it.id } }
         .flatMapLatest { ids ->
             if (ids.isEmpty()) kotlinx.coroutines.flow.flowOf(emptyMap<Long, Int>())
             else repository.observeComicCountBySources(ids)
+        }
+        .scan(emptyMap<Long, Int>()) { acc, value ->
+            if (value.isEmpty() && acc.isNotEmpty()) acc else value
         }
 
     val sources: StateFlow<List<SourceRow>> = combine(

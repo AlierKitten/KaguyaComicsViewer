@@ -43,6 +43,9 @@ class ComicRepositoryImpl @Inject constructor(
     override fun observeComicsBySources(sourceIds: List<Long>): Flow<List<Comic>> =
         comicDao.observeBySources(sourceIds).map { list -> list.map { it.toDomain() } }
 
+    override fun observeAllComics(): Flow<List<Comic>> =
+        comicDao.observeAll().map { list -> list.map { it.toDomain() } }
+
     override fun observeComicCountBySources(sourceIds: List<Long>): Flow<Map<Long, Int>> =
         comicDao.countBySources(sourceIds).map { list -> list.associate { it.sourceId to it.count } }
 

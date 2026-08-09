@@ -21,9 +21,12 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -45,7 +48,8 @@ private data class DisplaySortPrefs(
     val displayMode: LibraryDisplayMode,
     val showCovers: Boolean,
     val sortField: ComicSortField,
-    val sortAscending: Boolean
+    val sortAscending: Boolean,
+    val enabledIds: Set<Long>
 )
 
 data class ComicRow(
@@ -92,7 +96,10 @@ class LibraryViewModel @Inject constructor(
             }
         }
     }
-    private val sourceIds = repository.observeSources().map { srcs -> srcs.filter { it.enabled }.map { it.id } }
+
+    // 启用中的源 id 集合：仅用于 UI 层过滤显示（关闭源 = 隐藏，不删除数据、不重新索引）
+    private val enabledSourceIds =
+        repository.observeSources().map { srcs -> srcs.filter { it.enabled }.map { it.id }.toSet() }
 
     // 当前正在加载的漫画进度
     private val _loadingProgress = MutableStateFlow<LoadingProgress?>(null)
@@ -102,24 +109,43 @@ class LibraryViewModel @Inject constructor(
     private val _toastEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val toastEvents = _toastEvents.asSharedFlow()
 
-    // 用 flatMapLatest + combine 为每个 comic 附加 cache + progress
-    private val comicsFlow = sourceIds.flatMapLatest { ids ->
-        if (ids.isEmpty()) flowOf(emptyList<ComicRow>())
-        else repository.observeComicsBySources(ids).flatMapLatest { comics ->
-            if (comics.isEmpty()) flowOf(emptyList<ComicRow>())
-            else {
-                val rowFlows = comics.map { comic ->
-                    combine(
-                        repository.observeCache(comic.id),
-                        repository.observeProgress(comic.id)
-                    ) { cache, progress ->
-                        ComicRow(comic = comic, cache = cache, progress = progress?.page ?: 0, isFinished = progress?.isFinished ?: false)
-                    }
-                }
-                combine(rowFlows) { it.toList() }
-            }
-        }
+    // 将单个 Comic 包装成带 cache + progress 的 ComicRow Flow
+    private fun toRowFlow(comic: Comic) = combine(
+        repository.observeCache(comic.id),
+        repository.observeProgress(comic.id)
+    ) { cache, progress ->
+        ComicRow(
+            comic = comic,
+            cache = cache,
+            progress = progress?.page ?: 0,
+            isFinished = progress?.isFinished ?: false
+        )
     }
+
+    // 始终查询所有源的漫画：与源的启用/关闭完全解耦，数据不会被删除。
+    // 源关闭仅在最终 UI 层过滤（隐藏），重新启用即可立即恢复，无需重新扫描。
+    //
+    // 关键修复：comics.source_id 是 comic_sources 的外键，Room 的 InvalidationTracker 在
+    // 源的 enabled 字段被 upsert 时会使 comics 相关查询失效并重查。重查瞬间可能短暂
+    // 返回空列表；若直接 flatMapLatest 到空的 flowOf，内层会被取消且上游不再变化，
+    // 导致 comicsFlow 永久停留在 0（重新启用也无法恢复）。因此用 scan 保留上一次
+    // 非空快照，空发射不覆盖已有数据，避免瞬时空击穿 UI。
+    private val comicsFlow: kotlinx.coroutines.flow.Flow<List<ComicRow>> =
+        repository.observeAllComics()
+            .scan(emptyList<Comic>()) { acc, value ->
+                if (value.isEmpty() && acc.isNotEmpty()) acc else value
+            }
+            .flatMapLatest { comics ->
+                if (comics.isEmpty()) {
+                    flowOf(emptyList<ComicRow>())
+                } else {
+                    val rowFlows = comics.map { toRowFlow(it) }
+                    combine(rowFlows) { it.toList() }
+                }
+            }.onEach { rows: List<ComicRow> ->
+                Log.d("LibraryVM", "comicsFlow emitted: ${rows.size} rows")
+            }
+
 
     private val recentFlow = combine(
         repository.observeLoading(),
@@ -130,26 +156,30 @@ class LibraryViewModel @Inject constructor(
         val merged = loading + recent.filter { it.id !in loadingIds }
         merged
     }.flatMapLatest { comics ->
-        if (comics.isEmpty()) flowOf(emptyList<ComicRow>())
-        else {
-            val rowFlows = comics.map { comic ->
-                combine(
-                    repository.observeCache(comic.id),
-                    repository.observeProgress(comic.id)
-                ) { cache, progress ->
-                    ComicRow(comic = comic, cache = cache, progress = progress?.page ?: 0, isFinished = progress?.isFinished ?: false)
-                }
-            }
+        if (comics.isEmpty()) {
+            flowOf(emptyList<ComicRow>())
+        } else {
+            val rowFlows = comics.map { toRowFlow(it) }
             combine(rowFlows) { it.toList() }
         }
     }
 
-    // displayMode + showCovers + sort 合并为一个 Flow，避免 combine 超过 5 个参数
-    private val displaySortPrefs = combine(displayMode, showCovers, sortField, sortAscending) { dm, scv, sf, asc ->
-        DisplaySortPrefs(dm, scv, sf, asc)
+    // displayMode + showCovers + sort + enabledSourceIds 合并为一个 Flow，避免 combine 超过 5 个参数
+    private val displaySortPrefs = combine(
+        displayMode,
+        showCovers,
+        sortField,
+        sortAscending,
+        enabledSourceIds
+    ) { dm, scv, sf, asc, enabledIds ->
+        DisplaySortPrefs(dm, scv, sf, asc, enabledIds)
     }
 
-    fun sortComics(comics: List<ComicRow>, field: ComicSortField, ascending: Boolean): List<ComicRow> {
+    fun sortComics(
+        comics: List<ComicRow>,
+        field: ComicSortField,
+        ascending: Boolean
+    ): List<ComicRow> {
         val sorted = when (field) {
             ComicSortField.NAME -> comics.sortedBy { it.comic.title.lowercase() }
             ComicSortField.SIZE -> comics.sortedBy { it.comic.sizeBytes }
@@ -161,23 +191,36 @@ class LibraryViewModel @Inject constructor(
     val state: StateFlow<LibraryUiState> = combine(
         comicsFlow, recentFlow, query, scanning, displaySortPrefs
     ) { comics, recent, q, sc, prefs ->
-        val filtered = if (q.isBlank()) comics else {
+        // 按源的启用/关闭做纯 UI 过滤：关闭的源仅隐藏，不删除数据、不重新索引
+        val visibleComics = comics.filter { it.comic.sourceId in prefs.enabledIds }
+        val visibleRecent = recent.filter { it.comic.sourceId in prefs.enabledIds }
+        val filtered = if (q.isBlank()) {
+            visibleComics
+        } else {
             val keywords = q.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-            if (keywords.isEmpty()) comics
-            else comics.filter { row ->
-                keywords.all { keyword -> row.comic.title.contains(keyword, ignoreCase = true) }
+            if (keywords.isEmpty()) {
+                visibleComics
+            } else {
+                visibleComics.filter { row ->
+                    keywords.all { keyword -> row.comic.title.contains(keyword, ignoreCase = true) }
+                }
             }
         }
         LibraryUiState(
             isScanning = sc,
             comics = sortComics(filtered, prefs.sortField, prefs.sortAscending),
-            recent = recent,
+            recent = visibleRecent,
             query = q,
             displayMode = prefs.displayMode,
             showCovers = prefs.showCovers,
             sortField = prefs.sortField,
             sortAscending = prefs.sortAscending
-        )
+        ).also {
+            Log.d(
+                "LibraryVM",
+                "state recompute: allComics=${comics.size}, enabledIds=${prefs.enabledIds}, visible=${filtered.size}, query='$q'"
+            )
+        }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryUiState())
 
     fun setQuery(q: String) {
@@ -189,7 +232,8 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun toggleDisplayMode() {
-        val next = if (displayMode.value == LibraryDisplayMode.GRID) LibraryDisplayMode.LIST else LibraryDisplayMode.GRID
+        val next =
+            if (displayMode.value == LibraryDisplayMode.GRID) LibraryDisplayMode.LIST else LibraryDisplayMode.GRID
         displayMode.value = next
         viewModelScope.launch { settings.setLibraryDisplayMode(next.ordinal) }
     }

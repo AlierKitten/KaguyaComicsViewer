@@ -2,6 +2,7 @@ package com.kaguya.comicsviewer.domain.usecase
 
 import android.util.Log
 import com.kaguya.comicsviewer.data.repository.ComicRepository
+import com.kaguya.comicsviewer.data.source.DiscoveredComic
 import com.kaguya.comicsviewer.data.source.LocalFileScanner
 import com.kaguya.comicsviewer.data.source.SmbFileScanner
 import com.kaguya.comicsviewer.domain.model.Comic
@@ -113,28 +114,57 @@ class ScanSourceUseCase @Inject constructor(
             }
         }
 
-        // 2b. 生成封面
+        // 2b. 生成封面（带自动重试：统计未获取封面数，有减少趋势就继续重试，直到不再减少或全部完成）
         if (needsCover.isNotEmpty()) {
-            onPhase2("正在生成封面共 (${needsCover.size} 个漫画)...")
-            var coverCount = 0
-            // 一次性获取当前数据库中的漫画
+            // pending 持有「漫画 + 原始发现项」对，失败时留到下一轮重试
             val comicsByPath = repository.listComicsBySources(listOf(source.id)).associateBy { it.filePath }
-            for (d in needsCover) {
-                val comic = comicsByPath[d.relativePath] ?: continue
-                if (comic.coverPath != null) continue
-                try {
-                    val coverBytes = scanner.cover(source, d) ?: continue
-                    val coverFile = cacheDirs.coverFile(comic.id)
-                    coverFile.parentFile?.mkdirs()
-                    FileOutputStream(coverFile).use { it.write(coverBytes) }
-                    repository.upsertComic(comic.copy(coverPath = coverFile.absolutePath))
-                    coverCount++
-                    Log.d(TAG, "phase2: cover generated for comicId=${comic.id}, title='${d.title}'")
-                } catch (e: Exception) {
-                    Log.w(TAG, "phase2: cover generation failed for '${d.title}': ${e.message}")
+            var pending = needsCover.mapNotNull { d -> comicsByPath[d.relativePath]?.let { c -> c to d } }
+                .filter { (comic, _) -> comic.coverPath == null }
+            var round = 0
+            var prevSize = pending.size
+            onPhase2("正在生成封面共 (${pending.size} 个漫画)...")
+            while (pending.isNotEmpty()) {
+                round++
+                val stillFailing = mutableListOf<Pair<Comic, DiscoveredComic>>()
+                var successInRound = 0
+                for ((comic, d) in pending) {
+                    // 数据库里可能已被上轮更新，重新读取最新 coverPath
+                    val latest = repository.findComic(comic.id)
+                    if (latest?.coverPath != null) continue
+                    try {
+                        val coverBytes = scanner.cover(source, d)
+                        if (coverBytes != null) {
+                            val coverFile = cacheDirs.coverFile(comic.id)
+                            coverFile.parentFile?.mkdirs()
+                            FileOutputStream(coverFile).use { it.write(coverBytes) }
+                            repository.upsertComic(comic.copy(coverPath = coverFile.absolutePath))
+                            successInRound++
+                            Log.d(TAG, "phase2: cover generated for comicId=${comic.id}, title='${d.title}'")
+                        } else {
+                            stillFailing.add(comic to d)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "phase2: cover generation failed for '${d.title}': ${e.message}")
+                        stillFailing.add(comic to d)
+                    }
                 }
+                pending = stillFailing
+                val remaining = pending.size
+                if (remaining == 0) {
+                    onPhase2("封面已全部生成完成")
+                    break
+                }
+                // 有减少趋势（本轮有成功且数量在下降）才继续重试，否则停止避免无谓循环
+                if (successInRound == 0 || remaining >= prevSize) {
+                    onPhase2("有 $remaining 个封面未能获取，请检查网络或稍后刷新重试")
+                    break
+                }
+                prevSize = remaining
+                onPhase2("第 $round 轮完成，仍有 $remaining 个封面未获取，正在重试...")
+                // 轮间退避，让 SMB 连接释放，缓解连接数上限
+                kotlinx.coroutines.delay(1500L)
             }
-            Log.d(TAG, "phase2: generated $coverCount covers")
+            Log.d(TAG, "phase2: covers done, remaining pending=${pending.size}")
         }
 
         onPhase2("扫描完成")

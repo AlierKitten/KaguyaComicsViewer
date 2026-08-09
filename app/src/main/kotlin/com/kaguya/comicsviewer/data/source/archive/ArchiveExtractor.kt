@@ -175,6 +175,78 @@ class ArchiveExtractor @Inject constructor() {
         decodeCoverBitmap(archive, fileName)
     }
 
+    /**
+     * 从压缩包输入流读取第一张图片作为封面（流式，不落盘整包）。
+     * 适用于 ZIP/CBZ：直接包裹 [ZipArchiveInputStream] 顺序读取，找到首个图片条目即解码，
+     * 无需等待整包传输完成。RAR 不支持纯流式随机访问，会回退到 [fallback]（例如落盘临时文件后调 [readCover]）。
+     *
+     * @param fileName  用于检测压缩包类型（扩展名）
+     * @param fallback  当类型需要随机访问（RAR）时调用，参数为已可读的输入流（若无法重复读取可返回 null）
+     */
+    suspend fun readCoverFromStream(
+        input: InputStream,
+        fileName: String,
+        fallback: suspend (InputStream) -> ByteArray? = { null }
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        when (detectType(fileName)) {
+            ArchiveType.ZIP -> decodeCoverBitmapFromStream(input, fileName)
+            ArchiveType.RAR -> fallback(input)
+            null -> null
+        }
+    }
+
+    /** 流式解码 ZIP/CBZ 封面：顺序读取首个图片条目，边读边解，找到即停。 */
+    private fun decodeCoverBitmapFromStream(input: InputStream, fileName: String): ByteArray? {
+        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
+        val type = detectType(fileName) ?: return null
+        if (type != ArchiveType.ZIP) return null
+        val buffered = if (input is BufferedInputStream) input else BufferedInputStream(input, 256 * 1024)
+        val tempImg = File.createTempFile("cover_img_", ".tmp")
+        try {
+            var found = false
+            buffered.use { bis ->
+                ZipArchiveInputStream(bis).use { zip ->
+                    while (!found) {
+                        val entry = zip.nextEntry ?: break
+                        if (entry.isDirectory) continue
+                        val name = entry.name.substringAfterLast('/')
+                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
+                            FileOutputStream(tempImg).use { out -> zip.copyTo(out) }
+                            found = true
+                        }
+                    }
+                }
+            }
+            if (!found) return null
+            return decodeBitmapToFile(tempImg)
+        } catch (e: Exception) {
+            null
+        } finally {
+            tempImg.delete()
+        }
+        return null
+    }
+
+    /** 将已落盘的临时图片 [tempImg] 解码、缩放并压缩为封面 JPEG 字节。 */
+    private fun decodeBitmapToFile(tempImg: File): ByteArray? {
+        try {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(tempImg.absolutePath, opts)
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+            val targetSize = 480
+            val maxDim = maxOf(opts.outWidth, opts.outHeight)
+            opts.inSampleSize = if (maxDim > targetSize) maxDim / targetSize else 1
+            opts.inJustDecodeBounds = false
+            val bitmap = BitmapFactory.decodeFile(tempImg.absolutePath, opts) ?: return null
+            val baos = ByteArrayOutputStream(64 * 1024)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+            bitmap.recycle()
+            return baos.toByteArray()
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
     suspend fun readEntry(archive: File, entryName: String): ByteArray? = withContext(Dispatchers.IO) {
         readEntryInternal(archive, entryName, archive.name)
     }
@@ -301,30 +373,13 @@ class ArchiveExtractor @Inject constructor() {
                 }
             }
             if (!found) return null
-
-            // 先解码边界
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(tempImg.absolutePath, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-
-            // 计算 inSampleSize，目标最长边 480px
-            val targetSize = 480
-            val maxDim = maxOf(opts.outWidth, opts.outHeight)
-            opts.inSampleSize = if (maxDim > targetSize) maxDim / targetSize else 1
-            opts.inJustDecodeBounds = false
-
-            val bitmap = BitmapFactory.decodeFile(tempImg.absolutePath, opts) ?: return null
-
-            // 压缩为 JPEG
-            val baos = ByteArrayOutputStream(64 * 1024)
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-            bitmap.recycle()
-            return baos.toByteArray()
+            decodeBitmapToFile(tempImg)
         } catch (e: Exception) {
-            return null
+            null
         } finally {
             tempImg.delete()
         }
+        return null
     }
 
     private fun safeOutputFile(dir: File, name: String): File {
