@@ -8,6 +8,7 @@ import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
+import com.kaguya.comicsviewer.domain.model.ComicSortField
 import com.kaguya.comicsviewer.domain.usecase.CancelDownloadUseCase
 import com.kaguya.comicsviewer.domain.usecase.DownloadComicUseCase
 import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
@@ -35,7 +36,16 @@ data class LibraryUiState(
     val recent: List<ComicRow> = emptyList(),
     val query: String = "",
     val displayMode: LibraryDisplayMode = LibraryDisplayMode.GRID,
-    val showCovers: Boolean = true
+    val showCovers: Boolean = true,
+    val sortField: ComicSortField = ComicSortField.NAME,
+    val sortAscending: Boolean = true
+)
+
+private data class DisplaySortPrefs(
+    val displayMode: LibraryDisplayMode,
+    val showCovers: Boolean,
+    val sortField: ComicSortField,
+    val sortAscending: Boolean
 )
 
 data class ComicRow(
@@ -68,6 +78,8 @@ class LibraryViewModel @Inject constructor(
     private val scanning = MutableStateFlow(false)
     private val displayMode = MutableStateFlow(LibraryDisplayMode.GRID)
     private val showCovers = MutableStateFlow(true)
+    private val sortField = MutableStateFlow(ComicSortField.NAME)
+    private val sortAscending = MutableStateFlow(true)
 
     init {
         // 监听设置变化
@@ -75,6 +87,8 @@ class LibraryViewModel @Inject constructor(
             settings.settings.collect { s ->
                 displayMode.value = LibraryDisplayMode.entries[s.libraryDisplayMode]
                 showCovers.value = s.showCovers
+                sortField.value = s.sortField
+                sortAscending.value = s.sortAscending
             }
         }
     }
@@ -130,12 +144,23 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    // displayMode + showCovers 合并为一个 Flow，避免 combine 超过 5 个参数
-    private val displayPrefs = combine(displayMode, showCovers) { dm, scv -> dm to scv }
+    // displayMode + showCovers + sort 合并为一个 Flow，避免 combine 超过 5 个参数
+    private val displaySortPrefs = combine(displayMode, showCovers, sortField, sortAscending) { dm, scv, sf, asc ->
+        DisplaySortPrefs(dm, scv, sf, asc)
+    }
+
+    fun sortComics(comics: List<ComicRow>, field: ComicSortField, ascending: Boolean): List<ComicRow> {
+        val sorted = when (field) {
+            ComicSortField.NAME -> comics.sortedBy { it.comic.title.lowercase() }
+            ComicSortField.SIZE -> comics.sortedBy { it.comic.sizeBytes }
+            ComicSortField.DATE -> comics.sortedBy { it.comic.addedAt }
+        }
+        return if (ascending) sorted else sorted.reversed()
+    }
 
     val state: StateFlow<LibraryUiState> = combine(
-        comicsFlow, recentFlow, query, scanning, displayPrefs
-    ) { comics, recent, q, sc, (dm, scv) ->
+        comicsFlow, recentFlow, query, scanning, displaySortPrefs
+    ) { comics, recent, q, sc, prefs ->
         val filtered = if (q.isBlank()) comics else {
             val keywords = q.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
             if (keywords.isEmpty()) comics
@@ -143,7 +168,16 @@ class LibraryViewModel @Inject constructor(
                 keywords.all { keyword -> row.comic.title.contains(keyword, ignoreCase = true) }
             }
         }
-        LibraryUiState(isScanning = sc, comics = filtered, recent = recent, query = q, displayMode = dm, showCovers = scv)
+        LibraryUiState(
+            isScanning = sc,
+            comics = sortComics(filtered, prefs.sortField, prefs.sortAscending),
+            recent = recent,
+            query = q,
+            displayMode = prefs.displayMode,
+            showCovers = prefs.showCovers,
+            sortField = prefs.sortField,
+            sortAscending = prefs.sortAscending
+        )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryUiState())
 
     fun setQuery(q: String) {
@@ -158,6 +192,17 @@ class LibraryViewModel @Inject constructor(
         val next = if (displayMode.value == LibraryDisplayMode.GRID) LibraryDisplayMode.LIST else LibraryDisplayMode.GRID
         displayMode.value = next
         viewModelScope.launch { settings.setLibraryDisplayMode(next.ordinal) }
+    }
+
+    fun setSortField(field: ComicSortField) {
+        sortField.value = field
+        viewModelScope.launch { settings.setSortField(field) }
+    }
+
+    fun toggleSortDirection() {
+        val next = !sortAscending.value
+        sortAscending.value = next
+        viewModelScope.launch { settings.setSortAscending(next) }
     }
 
     fun scanAll() {

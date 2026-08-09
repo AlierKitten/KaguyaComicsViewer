@@ -1,13 +1,25 @@
 package com.kaguya.comicsviewer.domain.model
 
-/** 阅读模式。 */
-enum class ReadingMode {
-    /** 左右翻页（横屏/单页式）。 */
-    PAGED,
+/** 漫画库排序字段。 */
+enum class ComicSortField {
+    /** 按名称。 */
+    NAME,
 
-    /** 上下翻页（垂直方向一页一页翻）。 */
-    CONTINUOUS,
+    /** 按大小。 */
+    SIZE,
 
-    /** Webtoon 式条带滚动（垂直方向连续滚动）。 */
-    WEBTOON
+    /** 按日期（加入漫画库的时间）。 */
+    DATE
 }
+
+/** 漫画库排序方向。 */
+enum class SortDirection {
+    ASCENDING,
+    DESCENDING
+}
+
+/** 漫画库排序方式，由字段 + 方向组成。 */
+data class ComicSortOrder(
+    val field: ComicSortField = ComicSortField.NAME,
+    val direction: SortDirection = SortDirection.ASCENDING
+)

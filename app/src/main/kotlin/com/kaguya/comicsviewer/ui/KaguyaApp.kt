@@ -15,6 +15,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -43,6 +46,9 @@ fun KaguyaApp() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
 
+    // 点击已选中的 Tab 时自增，用于通知对应页面滚动到顶部
+    var scrollToTopSignal by remember { mutableLongStateOf(0L) }
+
     val tabRoutes = listOf(Tab.Library, Tab.Recent, Tab.Sources, Tab.Settings)
     val showBar = backStack?.destination?.route in tabRoutes.map { it.route }
 
@@ -55,10 +61,15 @@ fun KaguyaApp() {
                         NavigationBarItem(
                             selected = selected,
                             onClick = {
-                                nav.navigate(tab.route) {
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                if (selected) {
+                                    // 已在当前 Tab，触发滚动到顶部
+                                    scrollToTopSignal++
+                                } else {
+                                    nav.navigate(tab.route) {
+                                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
                                 }
                             },
                             icon = { Icon(tab.icon, contentDescription = null) },
@@ -69,14 +80,15 @@ fun KaguyaApp() {
             }
         }
     ) { padding ->
-        AppNavHost(nav, padding)
+        AppNavHost(nav, padding, scrollToTopSignal)
     }
 }
 
 @Composable
 private fun AppNavHost(
     nav: androidx.navigation.NavHostController,
-    padding: PaddingValues
+    padding: PaddingValues,
+    scrollToTopSignal: Long
 ) {
     NavHost(
         navController = nav,
@@ -85,8 +97,8 @@ private fun AppNavHost(
             .fillMaxSize()
             .padding(padding)
     ) {
-        composable(Tab.Library.route) { LibraryScreen(nav) }
-        composable(Tab.Recent.route) { RecentScreen(nav) }
+        composable(Tab.Library.route) { LibraryScreen(nav, scrollToTopSignal) }
+        composable(Tab.Recent.route) { RecentScreen(nav, scrollToTopSignal) }
         composable(Tab.Sources.route) { SourcesScreen(nav) }
         composable(Tab.Settings.route) { SettingsScreen(nav) }
         composable(

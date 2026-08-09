@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
@@ -34,6 +35,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,17 +51,29 @@ import androidx.navigation.NavController
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.kaguya.comicsviewer.domain.model.CacheState
+import com.kaguya.comicsviewer.ui.components.AdaptiveScrollbar
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentScreen(
     nav: NavController,
+    scrollToTopSignal: Long = 0L,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val loadingProgress by viewModel.loadingProgress.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    // 点击底部导航已选中的"继续阅读"时，自动滚动到顶部
+    LaunchedEffect(scrollToTopSignal) {
+        if (scrollToTopSignal > 0) {
+            scope.launch { listState.scrollToItem(0) }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.toastEvents.collect { msg ->
@@ -125,24 +139,31 @@ fun RecentScreen(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(state.recent, key = { it.comic.id }) { row ->
-                    RecentListItem(row, showCover = state.showCovers,
-                        onClick = {
-                            when (row.cache?.state) {
-                                CacheState.READY -> nav.navigate("reader/${row.comic.id}")
-                                CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.PENDING, CacheState.DOWNLOADED ->
-                                    viewModel.startLoading(row.comic.id, row.comic.title)
-                                else -> viewModel.startLoading(row.comic.id, row.comic.title)
-                            }
-                        },
-                        onCancel = { viewModel.cancelLoading(row.comic.id) }
-                    )
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(state.recent, key = { it.comic.id }) { row ->
+                        RecentListItem(row, showCover = state.showCovers,
+                            onClick = {
+                                when (row.cache?.state) {
+                                    CacheState.READY -> nav.navigate("reader/${row.comic.id}")
+                                    CacheState.DOWNLOADING, CacheState.EXTRACTING, CacheState.PENDING, CacheState.DOWNLOADED ->
+                                        viewModel.startLoading(row.comic.id, row.comic.title)
+                                    else -> viewModel.startLoading(row.comic.id, row.comic.title)
+                                }
+                            },
+                            onCancel = { viewModel.cancelLoading(row.comic.id) }
+                        )
+                    }
                 }
+                AdaptiveScrollbar(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
             }
         }
     }

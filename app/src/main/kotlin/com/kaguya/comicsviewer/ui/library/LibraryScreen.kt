@@ -18,19 +18,26 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SortByAlpha
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,7 +54,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,19 +73,37 @@ import androidx.navigation.NavController
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.kaguya.comicsviewer.domain.model.CacheState
+import com.kaguya.comicsviewer.domain.model.ComicSortField
+import com.kaguya.comicsviewer.ui.components.AdaptiveScrollbar
 import com.kaguya.comicsviewer.util.FormatUtils
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     nav: NavController,
+    scrollToTopSignal: Long = 0L,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val loadingProgress by viewModel.loadingProgress.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    var showSortMenu by remember { mutableStateOf(false) }
+    val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    // 点击底部导航已选中的"漫画库"时，自动滚动到顶部
+    LaunchedEffect(scrollToTopSignal) {
+        if (scrollToTopSignal > 0) {
+            when (state.displayMode) {
+                LibraryDisplayMode.GRID -> scope.launch { gridState.scrollToItem(0) }
+                LibraryDisplayMode.LIST -> scope.launch { listState.scrollToItem(0) }
+            }
+        }
+    }
 
     // Toast 事件监听
     LaunchedEffect(Unit) {
@@ -113,6 +141,39 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("漫画库") },
                 actions = {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(Icons.Outlined.SortByAlpha, contentDescription = "排序")
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false }
+                    ) {
+                        val fieldLabel = mapOf(
+                            ComicSortField.NAME to "名称",
+                            ComicSortField.SIZE to "大小",
+                            ComicSortField.DATE to "日期"
+                        )
+                        ComicSortField.entries.forEach { field ->
+                            DropdownMenuItem(
+                                text = { Text(fieldLabel[field] ?: field.name) },
+                                trailingIcon = {
+                                    if (state.sortField == field) {
+                                        Icon(
+                                            if (state.sortAscending) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
+                                            contentDescription = null
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    if (state.sortField == field) {
+                                        viewModel.toggleSortDirection()
+                                    } else {
+                                        viewModel.setSortField(field)
+                                    }
+                                }
+                            )
+                        }
+                    }
                     IconButton(onClick = { viewModel.toggleDisplayMode() }) {
                         Icon(
                             if (state.displayMode == LibraryDisplayMode.GRID) Icons.Outlined.ViewList else Icons.Outlined.ViewAgenda,
@@ -149,30 +210,44 @@ fun LibraryScreen(
             if (state.comics.isEmpty() && state.recent.isEmpty()) {
                 EmptyLibrary()
             } else if (state.displayMode == LibraryDisplayMode.GRID) {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(120.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(state.comics, key = { it.comic.id }) { row ->
-                        ComicGridItem(row, showCover = state.showCovers, onClick = {
-                            handleComicClick(row, nav, viewModel)
-                        })
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(120.dp),
+                        contentPadding = PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(state.comics, key = { it.comic.id }) { row ->
+                            ComicGridItem(row, showCover = state.showCovers, onClick = {
+                                handleComicClick(row, nav, viewModel)
+                            })
+                        }
                     }
+                    AdaptiveScrollbar(
+                        state = gridState,
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    )
                 }
             } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(state.comics, key = { it.comic.id }) { row ->
-                        ComicListItem(row, showCover = state.showCovers, onClick = {
-                            handleComicClick(row, nav, viewModel)
-                        })
+                Box(Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(state.comics, key = { it.comic.id }) { row ->
+                            ComicListItem(row, showCover = state.showCovers, onClick = {
+                                handleComicClick(row, nav, viewModel)
+                            })
+                        }
                     }
+                    AdaptiveScrollbar(
+                        state = listState,
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    )
                 }
             }
         }

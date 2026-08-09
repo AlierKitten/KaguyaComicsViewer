@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.data.prefs
 
+import com.kaguya.comicsviewer.domain.model.ComicSortField
 import com.kaguya.comicsviewer.domain.model.ReadingMode
 import com.tencent.mmkv.MMKV
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +16,9 @@ data class AppSettings(
     val darkMode: Boolean = false,
     val dynamicColor: Boolean = true,
     val libraryDisplayMode: Int = 0,
-    val showCovers: Boolean = true
+    val showCovers: Boolean = true,
+    val sortField: ComicSortField = ComicSortField.NAME,
+    val sortAscending: Boolean = true
 )
 
 @Singleton
@@ -31,6 +34,8 @@ class SettingsRepository @Inject constructor() {
     private val keyDynamicColor = "dynamic_color"
     private val keyLibraryDisplayMode = "library_display_mode"
     private val keyShowCovers = "show_covers"
+    private val keySortField = "sort_field"
+    private val keySortAscending = "sort_ascending"
 
     private fun readSettings(): AppSettings = AppSettings(
         readingMode = kv.decodeString(keyReadingMode)?.let { runCatching { ReadingMode.valueOf(it) }.getOrNull() }
@@ -41,7 +46,10 @@ class SettingsRepository @Inject constructor() {
         darkMode = kv.decodeBool(keyDarkMode, false),
         dynamicColor = kv.decodeBool(keyDynamicColor, true),
         libraryDisplayMode = kv.decodeInt(keyLibraryDisplayMode, 0),
-        showCovers = kv.decodeBool(keyShowCovers, true)
+        showCovers = kv.decodeBool(keyShowCovers, true),
+        sortField = kv.decodeString(keySortField)?.let { runCatching { ComicSortField.valueOf(it) }.getOrNull() }
+            ?: ComicSortField.NAME,
+        sortAscending = kv.decodeBool(keySortAscending, true)
     )
 
     private val _settings = MutableStateFlow(readSettings())
@@ -88,6 +96,16 @@ class SettingsRepository @Inject constructor() {
 
     fun setShowCovers(enabled: Boolean) {
         kv.encode(keyShowCovers, enabled)
+        emit()
+    }
+
+    fun setSortField(field: ComicSortField) {
+        kv.encode(keySortField, field.name)
+        emit()
+    }
+
+    fun setSortAscending(ascending: Boolean) {
+        kv.encode(keySortAscending, ascending)
         emit()
     }
 }
