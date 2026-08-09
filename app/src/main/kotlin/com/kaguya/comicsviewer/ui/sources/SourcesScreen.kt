@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -77,6 +78,8 @@ fun SourcesScreen(
     val context = LocalContext.current
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val scanningIds by viewModel.scanningIds.collectAsStateWithLifecycle()
+    val isIndexing by viewModel.isIndexing.collectAsStateWithLifecycle()
+    val stopping by viewModel.stopping.collectAsStateWithLifecycle()
     var showSmb by remember { mutableStateOf(false) }
     var pendingLocalName by remember { mutableStateOf<String?>(null) }
 
@@ -105,10 +108,19 @@ fun SourcesScreen(
             TopAppBar(
                 title = { Text("文件源") },
                 actions = {
-                    IconButton(onClick = { viewModel.scanAllEnabled() }) {
-                        if (scanningIds.isNotEmpty()) {
-                            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                        } else {
+                    if (isIndexing) {
+                        IconButton(
+                            onClick = { viewModel.cancelIndexing() },
+                            enabled = !stopping
+                        ) {
+                            if (stopping) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                            } else {
+                                Icon(Icons.Outlined.Stop, contentDescription = "停止索引")
+                            }
+                        }
+                    } else {
+                        IconButton(onClick = { viewModel.scanAllEnabled() }) {
                             Icon(Icons.Outlined.Refresh, contentDescription = "全部刷新")
                         }
                     }

@@ -11,8 +11,8 @@ class SmbFileScanner @Inject constructor(
     private val smb: SmbClient,
 ) : ComicScanner {
 
-    override suspend fun scan(source: ComicSource): List<DiscoveredComic> {
-        return smb.scanRecursive(source, source.path)
+    override suspend fun scan(source: ComicSource, shouldCancel: () -> Boolean): List<DiscoveredComic> {
+        return smb.scanRecursive(source, source.path, shouldCancel)
     }
 
     override suspend fun fetchSizes(source: ComicSource, comics: List<DiscoveredComic>): Map<String, Long> {

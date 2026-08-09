@@ -7,6 +7,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -24,8 +25,11 @@ data class DiscoveredComic(
 
 /** 扫描器抽象。 */
 interface ComicScanner {
-    /** 快速扫描一个源，只返回漫画名和路径（不含文件大小）。 */
-    suspend fun scan(source: ComicSource): List<DiscoveredComic>
+    /**
+     * 快速扫描一个源，只返回漫画名和路径（不含文件大小）。
+     * @param shouldCancel 在扫描过程中周期性调用，返回 true 时扫描应中止并抛出 CancellationException。
+     */
+    suspend fun scan(source: ComicSource, shouldCancel: () -> Boolean = { false }): List<DiscoveredComic>
 
     /** 批量获取文件大小，返回 relativePath → sizeBytes 映射。 */
     suspend fun fetchSizes(source: ComicSource, comics: List<DiscoveredComic>): Map<String, Long>
@@ -41,19 +45,20 @@ class LocalFileScanner @Inject constructor(
     private val extractor: ArchiveExtractor
 ) : ComicScanner {
 
-    override suspend fun scan(source: ComicSource): List<DiscoveredComic> = withContext(Dispatchers.IO) {
+    override suspend fun scan(source: ComicSource, shouldCancel: () -> Boolean): List<DiscoveredComic> = withContext(Dispatchers.IO) {
         val treeUri = source.localUri ?: return@withContext emptyList()
         val root = DocumentFile.fromTreeUri(context, android.net.Uri.parse(treeUri)) ?: return@withContext emptyList()
         val results = mutableListOf<DiscoveredComic>()
-        walk(root, "", results)
+        walk(root, "", results, shouldCancel)
         results
     }
 
-    private fun walk(dir: DocumentFile, prefix: String, out: MutableList<DiscoveredComic>) {
+    private fun walk(dir: DocumentFile, prefix: String, out: MutableList<DiscoveredComic>, shouldCancel: () -> Boolean) {
+        if (shouldCancel()) throw CancellationException("scan cancelled")
         for (file in dir.listFiles()) {
             val name = file.name ?: continue
             if (file.isDirectory) {
-                walk(file, if (prefix.isEmpty()) name else "$prefix/$name", out)
+                walk(file, if (prefix.isEmpty()) name else "$prefix/$name", out, shouldCancel)
             } else {
                 if (extractor.detectType(name) == null) continue
                 val relative = if (prefix.isEmpty()) name else "$prefix/$name"

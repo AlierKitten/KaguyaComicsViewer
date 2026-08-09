@@ -10,6 +10,7 @@ import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
 import com.kaguya.comicsviewer.util.CacheDirectories
 import java.io.FileOutputStream
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /** 扫描一个源：发现所有漫画并同步到数据库。 */
@@ -23,6 +24,21 @@ class ScanSourceUseCase @Inject constructor(
         private const val TAG = "ScanSourceUseCase"
     }
 
+    /** 取消标志：由调用方在「开始一次扫描任务」前调用 resetCancellation() 清零；调用 cancel() 置为 true 后扫描循环应尽快中止（已写入的数据保留）。 */
+    private val cancelled = AtomicBoolean(false)
+
+    /** 重置取消标志（应在开始一次新的扫描任务时调用，不要在循环的每个源之前调用，否则会清除正在进行的取消请求）。 */
+    fun resetCancellation() {
+        cancelled.set(false)
+    }
+
+    /** 请求中止当前正在进行的扫描。 */
+    fun cancel() {
+        cancelled.set(true)
+    }
+
+    /** 当前是否请求中止。 */
+    fun isCancelled(): Boolean = cancelled.get()
     /**
      * 两阶段扫描：
      * 1. 快速索引所有漫画名（立即写入数据库，UI 可显示）
@@ -44,7 +60,10 @@ class ScanSourceUseCase @Inject constructor(
 
         // ── Phase 1: 快速索引 ──
         val found = try {
-            scanner.scan(source)
+            scanner.scan(source) { cancelled.get() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            Log.i(TAG, "scan cancelled for source '${source.name}'")
+            return 0
         } catch (e: Exception) {
             Log.e(TAG, "scan failed for source '${source.name}'", e)
             return 0
@@ -81,6 +100,7 @@ class ScanSourceUseCase @Inject constructor(
         onPhase1(found.size)
 
         // ── Phase 2: 后台获取文件大小 + 生成封面 ──
+        if (cancelled.get()) return found.size
         val needsSize = found.filter { it.sizeBytes == 0L }
         val needsCover = found.filter { d ->
             val prev = existingByPath[d.relativePath]
@@ -123,7 +143,7 @@ class ScanSourceUseCase @Inject constructor(
             var round = 0
             var prevSize = pending.size
             onPhase2("正在生成封面共 (${pending.size} 个漫画)...")
-            while (pending.isNotEmpty()) {
+            while (pending.isNotEmpty() && !cancelled.get()) {
                 round++
                 val stillFailing = mutableListOf<Pair<Comic, DiscoveredComic>>()
                 var successInRound = 0

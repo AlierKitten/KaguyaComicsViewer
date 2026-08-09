@@ -18,7 +18,8 @@ data class AppSettings(
     val libraryDisplayMode: Int = 0,
     val showCovers: Boolean = true,
     val sortField: ComicSortField = ComicSortField.NAME,
-    val sortAscending: Boolean = true
+    val sortAscending: Boolean = true,
+    val hideFromRecents: Boolean = false
 )
 
 @Singleton
@@ -36,6 +37,7 @@ class SettingsRepository @Inject constructor() {
     private val keyShowCovers = "show_covers"
     private val keySortField = "sort_field"
     private val keySortAscending = "sort_ascending"
+    private val keyHideFromRecents = "hide_from_recents"
 
     private fun readSettings(): AppSettings = AppSettings(
         readingMode = kv.decodeString(keyReadingMode)?.let { runCatching { ReadingMode.valueOf(it) }.getOrNull() }
@@ -49,7 +51,8 @@ class SettingsRepository @Inject constructor() {
         showCovers = kv.decodeBool(keyShowCovers, true),
         sortField = kv.decodeString(keySortField)?.let { runCatching { ComicSortField.valueOf(it) }.getOrNull() }
             ?: ComicSortField.NAME,
-        sortAscending = kv.decodeBool(keySortAscending, true)
+        sortAscending = kv.decodeBool(keySortAscending, true),
+        hideFromRecents = kv.decodeBool(keyHideFromRecents, false)
     )
 
     private val _settings = MutableStateFlow(readSettings())
@@ -106,6 +109,11 @@ class SettingsRepository @Inject constructor() {
 
     fun setSortAscending(ascending: Boolean) {
         kv.encode(keySortAscending, ascending)
+        emit()
+    }
+
+    fun setHideFromRecents(enabled: Boolean) {
+        kv.encode(keyHideFromRecents, enabled)
         emit()
     }
 }

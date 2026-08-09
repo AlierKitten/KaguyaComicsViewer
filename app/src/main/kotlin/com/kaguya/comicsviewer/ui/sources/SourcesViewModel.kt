@@ -41,6 +41,15 @@ class SourcesViewModel @Inject constructor(
     private val _scanningIds = MutableStateFlow<Set<Long>>(emptySet())
     val scanningIds: StateFlow<Set<Long>> = _scanningIds.asStateFlow()
 
+    /** 是否有任意源正在扫描中。 */
+    val isIndexing: StateFlow<Boolean> = _scanningIds
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** 是否请求过停止但扫描尚未完全退出（用于 UI 显示「正在停止…」）。 */
+    private val _stopping = MutableStateFlow(false)
+    val stopping: StateFlow<Boolean> = _stopping.asStateFlow()
+
     // 每个源的漫画数量
     // 同 LibraryViewModel：comics.source_id 是 comic_sources 外键，toggle enabled 会让
     // observeComicCountBySources 因 Room 失效重查并瞬间返回空 map；flatMapLatest 收到空
@@ -127,6 +136,8 @@ class SourcesViewModel @Inject constructor(
 
     fun scan(source: ComicSource) {
         viewModelScope.launch {
+            _stopping.value = false
+            scanUseCase.resetCancellation()
             _scanningIds.value = _scanningIds.value + source.id
             try {
                 val count = scanUseCase(
@@ -137,11 +148,13 @@ class SourcesViewModel @Inject constructor(
                     },
                     onPhase2 = { msg -> _toastEvents.tryEmit(msg) }
                 )
+                if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
             } catch (e: Exception) {
                 Log.e("SourcesViewModel", "scan failed for ${source.name}", e)
                 _toastEvents.tryEmit("扫描失败：${e.message}")
             } finally {
                 _scanningIds.value = _scanningIds.value - source.id
+                if (_scanningIds.value.isEmpty()) _stopping.value = false
             }
         }
     }
@@ -150,10 +163,14 @@ class SourcesViewModel @Inject constructor(
         viewModelScope.launch {
             val enabledSources = repository.listEnabledSources()
             if (enabledSources.isEmpty()) return@launch
+            _stopping.value = false
+            scanUseCase.resetCancellation()
             _scanningIds.value = enabledSources.map { it.id }.toSet()
             try {
                 var totalFound = 0
                 for (s in enabledSources) {
+                    // 已被用户中止则提前结束后续源扫描
+                    if (_stopping.value) break
                     try {
                         val count = scanUseCase(
                             s,
@@ -165,17 +182,28 @@ class SourcesViewModel @Inject constructor(
                         _toastEvents.tryEmit("扫描失败：${s.name} - ${e.message}")
                     }
                 }
-                if (totalFound == 0) {
+                if (_stopping.value) {
+                    _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
+                } else if (totalFound == 0) {
                     _toastEvents.tryEmit("扫描完成，未发现新漫画")
                 }
             } finally {
                 _scanningIds.value = emptySet()
+                _stopping.value = false
             }
         }
     }
 
+    /** 请求中止所有正在进行的索引。已写入数据库的漫画数据保留。 */
+    fun cancelIndexing() {
+        scanUseCase.cancel()
+        _stopping.value = true
+    }
+
     private suspend fun scanSourceById(sourceId: Long) {
         val source = repository.listEnabledSources().firstOrNull { it.id == sourceId } ?: return
+        _stopping.value = false
+        scanUseCase.resetCancellation()
         _scanningIds.value = _scanningIds.value + sourceId
         try {
             val count = scanUseCase(
@@ -186,11 +214,13 @@ class SourcesViewModel @Inject constructor(
                 },
                 onPhase2 = { msg -> _toastEvents.tryEmit(msg) }
             )
+            if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
         } catch (e: Exception) {
             Log.e("SourcesViewModel", "scan failed for ${source.name}", e)
             _toastEvents.tryEmit("扫描失败：${e.message}")
         } finally {
             _scanningIds.value = _scanningIds.value - sourceId
+            if (_scanningIds.value.isEmpty()) _stopping.value = false
         }
     }
 }

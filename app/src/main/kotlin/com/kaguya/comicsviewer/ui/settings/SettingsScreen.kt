@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.Brightness6
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Style
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -206,6 +207,15 @@ fun SettingsScreen(
                         "需要 Android 12 及以上版本",
                     checked = state.settings.dynamicColor,
                     onChange = viewModel::setDynamicColor
+                )
+            }
+
+            SectionCard(title = "隐私", icon = Icons.Outlined.VisibilityOff) {
+                ToggleRow(
+                    title = "隐藏最近任务预览图",
+                    subtitle = "在系统多任务列表中隐藏应用内容预览（同时禁止应用内截图）",
+                    checked = state.settings.hideFromRecents,
+                    onChange = viewModel::setHideFromRecents
                 )
             }
         }

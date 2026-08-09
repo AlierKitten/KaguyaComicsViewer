@@ -10,6 +10,7 @@ import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -136,7 +137,7 @@ class SmbClient @Inject constructor(
     }
 
     /** 快速扫描漫画文件，只返回路径不含文件大小。 */
-    suspend fun scanRecursive(source: ComicSource, path: String?): List<DiscoveredComic> = withContext(Dispatchers.IO) {
+    suspend fun scanRecursive(source: ComicSource, path: String?, shouldCancel: () -> Boolean = { false }): List<DiscoveredComic> = withContext(Dispatchers.IO) {
         withTimeout(SMB_TIMEOUT_MS * 6) {
             val ctx = createContext(source)
             val share = source.share?.ifBlank { null } ?: error("share missing")
@@ -147,7 +148,7 @@ class SmbClient @Inject constructor(
             val root = SmbFile(url, ctx)
             val result = mutableListOf<String>()
             val urlPrefix = "smb://${hostStr.substringBefore(':')}:$port/$share/"
-            collectArchives(root, result, urlPrefix)
+            collectArchives(root, result, urlPrefix, shouldCancel)
             Log.d(TAG, "scanRecursive: found ${result.size} archives")
             result.map { relPath ->
                 val fileName = relPath.substringAfterLast('/')
@@ -160,7 +161,8 @@ class SmbClient @Inject constructor(
         }
     }
 
-    private fun collectArchives(dir: SmbFile, result: MutableList<String>, urlPrefix: String) {
+    private fun collectArchives(dir: SmbFile, result: MutableList<String>, urlPrefix: String, shouldCancel: () -> Boolean) {
+        if (shouldCancel()) throw CancellationException("scan cancelled")
         val children = try {
             dir.listFiles() ?: return
         } catch (e: CIFSException) {
@@ -173,7 +175,7 @@ class SmbClient @Inject constructor(
                 when {
                     child.isDirectory -> {
                         Log.d(TAG, "collectArchives: entering dir ${child.name}")
-                        collectArchives(child, result, urlPrefix)
+                        collectArchives(child, result, urlPrefix, shouldCancel)
                     }
                     child.isFile -> {
                         val name = child.name.lowercase()
