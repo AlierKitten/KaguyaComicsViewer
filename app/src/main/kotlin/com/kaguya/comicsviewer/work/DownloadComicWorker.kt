@@ -8,6 +8,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.kaguya.comicsviewer.data.repository.ComicRepository
+import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.data.source.smb.SmbClient
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.ComicCache
@@ -27,6 +28,7 @@ class DownloadComicWorker @AssistedInject constructor(
     private val repository: ComicRepository,
     private val smbClient: SmbClient,
     private val cacheDirs: CacheDirectories,
+    private val extractor: ArchiveExtractor,
     private val notifications: ComicNotifications
 ) : CoroutineWorker(appContext, params) {
 
@@ -114,17 +116,36 @@ class DownloadComicWorker @AssistedInject constructor(
                     }
                 }
             }
-            repository.upsertCache(
-                ComicCache(
-                    comicId = comicId,
-                    state = CacheState.DOWNLOADED,
-                    archiveFile = outFile.absolutePath,
-                    extractedDir = null,
-                    totalBytes = outFile.length(),
-                    downloadedBytes = outFile.length(),
-                    lastError = null
+            val isZip = extractor.detectType(outFile.name)?.isZip == true
+            if (isZip) {
+                // ZIP/CBZ：下载完即可阅读（不整包解压，按需解压单页），直接置 READY
+                repository.upsertCache(
+                    ComicCache(
+                        comicId = comicId,
+                        state = CacheState.READY,
+                        archiveFile = outFile.absolutePath,
+                        extractedDir = null,
+                        totalBytes = outFile.length(),
+                        downloadedBytes = outFile.length(),
+                        lastError = null
+                    )
                 )
-            )
+                Log.d(TAG, "doWork: ZIP download complete -> READY (direct-read, no extract)")
+            } else {
+                // RAR：需整包解压，置 DOWNLOADED，由调度器链 ExtractComicWorker
+                repository.upsertCache(
+                    ComicCache(
+                        comicId = comicId,
+                        state = CacheState.DOWNLOADED,
+                        archiveFile = outFile.absolutePath,
+                        extractedDir = null,
+                        totalBytes = outFile.length(),
+                        downloadedBytes = outFile.length(),
+                        lastError = null
+                    )
+                )
+                Log.d(TAG, "doWork: RAR download complete -> DOWNLOADED (needs extract)")
+            }
             setProgressAsync(workDataOf(WorkParams.PROGRESS to 100))
             Log.d(TAG, "doWork: success")
             Result.success(workDataOf("archivePath" to outFile.absolutePath))

@@ -4,6 +4,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -23,16 +24,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -49,11 +54,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
+import com.kaguya.comicsviewer.domain.model.ComicPage
 import com.kaguya.comicsviewer.domain.model.ReadingMode
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.io.File
@@ -78,6 +85,7 @@ fun ReaderScreen(
     }
 
     var showOverlay by remember { mutableStateOf(false) }
+    var showJumpDialog by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -92,18 +100,21 @@ fun ReaderScreen(
                 when (state.mode) {
                     ReadingMode.PAGED -> PagedReader(
                         state = state,
+                        viewModel = viewModel,
                         onPageChange = viewModel::goTo,
                         onTap = { showOverlay = !showOverlay },
                         zoomEnabled = showOverlay
                     )
                     ReadingMode.CONTINUOUS -> VerticalPagedReader(
                         state = state,
+                        viewModel = viewModel,
                         onPageChange = viewModel::goTo,
                         onTap = { showOverlay = !showOverlay },
                         zoomEnabled = showOverlay
                     )
                     ReadingMode.WEBTOON -> ContinuousReader(
                         state = state,
+                        viewModel = viewModel,
                         onPageChange = viewModel::goTo,
                         onTap = { showOverlay = !showOverlay }
                     )
@@ -148,12 +159,13 @@ fun ReaderScreen(
                     }
                 }
             }
-            // 底部页码
+            // 底部页码（点击可跳转）
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { showJumpDialog = true }
                     .padding(8.dp)
             ) {
                 Row(
@@ -162,7 +174,7 @@ fun ReaderScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "第 ${state.page + 1} / ${state.pages.size} 页",
+                        "第 ${state.page + 1} / ${state.pages.size} 页  (点击跳转)",
                         color = Color.White,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -170,11 +182,60 @@ fun ReaderScreen(
             }
         }
     }
+
+    if (showJumpDialog) {
+        JumpDialog(
+            total = state.pages.size,
+            current = state.page + 1,
+            onDismiss = { showJumpDialog = false },
+            onConfirm = { target ->
+                viewModel.jumpTo(target - 1)
+                showJumpDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun JumpDialog(
+    total: Int,
+    current: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var text by remember { mutableStateOf(current.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("跳转到第几页") },
+        text = {
+            Column {
+                Text("共 $total 页", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.size(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.filter { c -> c.isDigit() } },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val target = text.toIntOrNull()?.coerceIn(1, total) ?: current
+                onConfirm(target)
+            }) { Text("跳转") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
 }
 
 @Composable
 private fun PagedReader(
     state: ReaderUiState,
+    viewModel: ReaderViewModel,
     onPageChange: (Int) -> Unit,
     onTap: () -> Unit,
     zoomEnabled: Boolean
@@ -190,6 +251,12 @@ private fun PagedReader(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.distinctUntilChanged().collect { p ->
             onPageChange(p)
+        }
+    }
+    // 响应跳转事件
+    LaunchedEffect(Unit) {
+        viewModel.jumpEvent.collect { target ->
+            pagerState.scrollToPage(target)
         }
     }
 
@@ -201,13 +268,14 @@ private fun PagedReader(
                 detectTapGestures(onTap = { onTap() })
             }
     ) { pageIndex ->
-        PageView(state.pages[pageIndex].path, zoomEnabled = zoomEnabled)
+        PageView(state.pages[pageIndex], zoomEnabled = zoomEnabled)
     }
 }
 
 @Composable
 private fun VerticalPagedReader(
     state: ReaderUiState,
+    viewModel: ReaderViewModel,
     onPageChange: (Int) -> Unit,
     onTap: () -> Unit,
     zoomEnabled: Boolean
@@ -225,6 +293,12 @@ private fun VerticalPagedReader(
             onPageChange(p)
         }
     }
+    // 响应跳转事件
+    LaunchedEffect(Unit) {
+        viewModel.jumpEvent.collect { target ->
+            pagerState.scrollToPage(target)
+        }
+    }
 
     VerticalPager(
         state = pagerState,
@@ -234,13 +308,14 @@ private fun VerticalPagedReader(
                 detectTapGestures(onTap = { onTap() })
             }
     ) { pageIndex ->
-        PageView(state.pages[pageIndex].path, zoomEnabled = zoomEnabled)
+        PageView(state.pages[pageIndex], zoomEnabled = zoomEnabled)
     }
 }
 
 @Composable
 private fun ContinuousReader(
     state: ReaderUiState,
+    viewModel: ReaderViewModel,
     onPageChange: (Int) -> Unit,
     onTap: () -> Unit
 ) {
@@ -254,6 +329,12 @@ private fun ContinuousReader(
             onPageChange(p)
         }
     }
+    // 响应跳转事件
+    LaunchedEffect(Unit) {
+        viewModel.jumpEvent.collect { target ->
+            listState.scrollToItem(target)
+        }
+    }
     LazyColumn(
         state = listState,
         contentPadding = PaddingValues(0.dp),
@@ -264,14 +345,14 @@ private fun ContinuousReader(
                 detectTapGestures(onTap = { onTap() })
             }
     ) {
-        items(state.pages, key = { it.path }) { p ->
-            PageView(p.path)
+        items(state.pages, key = { it.archivePath ?: it.path ?: it.index.toString() }) { p ->
+            PageView(p)
         }
     }
 }
 
 @Composable
-private fun PageView(path: String, zoomEnabled: Boolean = false) {
+private fun PageView(page: ComicPage, zoomEnabled: Boolean = false) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
@@ -281,6 +362,15 @@ private fun PageView(path: String, zoomEnabled: Boolean = false) {
             scale = 1f
             offset = Offset.Zero
         }
+    }
+
+    val model: Any = if (page.isArchive) {
+        ArchiveImage(page)
+    } else {
+        ImageRequest.Builder(LocalContext.current)
+            .data(File(page.path!!))
+            .crossfade(false)
+            .build()
     }
 
     Box(
@@ -300,10 +390,7 @@ private fun PageView(path: String, zoomEnabled: Boolean = false) {
         contentAlignment = Alignment.Center
     ) {
         SubcomposeAsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(File(path))
-                .crossfade(false)
-                .build(),
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Fit,
             loading = { CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(28.dp), color = Color.White.copy(alpha = 0.5f)) },

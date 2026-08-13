@@ -26,7 +26,8 @@ data class SettingsUiState(
     val coverSize: String = "0 B",
     val freeSpace: String = "—",
     val isClearing: Boolean = false,
-    val isClearingCovers: Boolean = false
+    val isClearingCovers: Boolean = false,
+    val isRefreshing: Boolean = false
 )
 
 @HiltViewModel
@@ -38,6 +39,7 @@ class SettingsViewModel @Inject constructor(
 
     private val _isClearing = MutableStateFlow(false)
     private val _isClearingCovers = MutableStateFlow(false)
+    private val _isRefreshing = MutableStateFlow(false)
 
     private val tick = MutableStateFlow(0L)
 
@@ -45,15 +47,17 @@ class SettingsViewModel @Inject constructor(
         settings.settings,
         _isClearing,
         _isClearingCovers,
+        _isRefreshing,
         tick
-    ) { s, clearing, clearingCovers, _ ->
+    ) { s, clearing, clearingCovers, refreshing, _ ->
         SettingsUiState(
             settings = s,
             cacheSize = FormatUtils.formatBytes(cacheDirs.totalSizeBytes()),
             coverSize = FormatUtils.formatBytes(cacheDirs.coverSizeBytes()),
             freeSpace = FormatUtils.formatBytes(java.io.File("/").usableSpaceOrZero()),
             isClearing = clearing,
-            isClearingCovers = clearingCovers
+            isClearingCovers = clearingCovers,
+            isRefreshing = refreshing
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsUiState())
 
@@ -72,6 +76,24 @@ class SettingsViewModel @Inject constructor(
     fun setShowCovers(enabled: Boolean) = viewModelScope.launch { settings.setShowCovers(enabled) }
     fun setIndexCoverOnScan(enabled: Boolean) = viewModelScope.launch { settings.setIndexCoverOnScan(enabled) }
     fun setHideFromRecents(enabled: Boolean) = viewModelScope.launch { settings.setHideFromRecents(enabled) }
+
+    /** 立即刷新存储占用统计。 */
+    fun refreshStorage() {
+        if (_isRefreshing.value) return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                withContext(Dispatchers.IO) {
+                    // 触发计算：totalSizeBytes / coverSizeBytes 在 tick 变化时重算
+                    cacheDirs.totalSizeBytes()
+                    cacheDirs.coverSizeBytes()
+                }
+                tick.value = System.currentTimeMillis()
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
 
     fun clearAllCache() {
         viewModelScope.launch {

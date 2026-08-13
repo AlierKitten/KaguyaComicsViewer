@@ -61,9 +61,18 @@ data class ReadingProgress(
     val isFinished: Boolean = false
 )
 
-/** 漫画页的展示模型（来自解压目录）。 */
+/**
+ * 漫画页的展示模型。
+ * - ZIP/CBZ（直接读压缩包）：[archivePath] + [entryName] 非空，[path] 为空
+ * - RAR（先整包解压）：[path] 为解压目录下的文件绝对路径，[archivePath]/[entryName] 为空
+ */
 data class ComicPage(
     val comicId: Long,
     val index: Int,
-    val path: String
-)
+    val path: String? = null,
+    val archivePath: String? = null,
+    val entryName: String? = null
+) {
+    /** 是否来自 ZIP 压缩包（需按需解压单页）。 */
+    val isArchive: Boolean get() = archivePath != null && entryName != null
+}

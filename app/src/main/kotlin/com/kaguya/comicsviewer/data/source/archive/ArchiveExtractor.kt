@@ -16,6 +16,7 @@ import java.io.InputStream
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.zip.ZipFile as JdkZipFile
 
 /**
  * 漫画压缩包解压器，支持 ZIP/CBZ/RAR。
@@ -257,17 +258,14 @@ class ArchiveExtractor @Inject constructor() {
         when (type) {
             ArchiveType.ZIP -> {
                 val names = mutableListOf<String>()
-                archive.inputStream().use { input ->
-                    BufferedInputStream(input).use { buffered ->
-                        ZipArchiveInputStream(buffered).use { zip ->
-                            while (true) {
-                                val entry = zip.nextEntry ?: break
-                                if (entry.isDirectory) continue
-                                val name = entry.name.substringAfterLast('/')
-                                if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                                    names += entry.name
-                                }
-                            }
+                JdkZipFile(archive).use { zip ->
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        if (entry.isDirectory) continue
+                        val name = entry.name.substringAfterLast('/')
+                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
+                            names += entry.name
                         }
                     }
                 }
@@ -294,21 +292,10 @@ class ArchiveExtractor @Inject constructor() {
         val type = detectType(fileName) ?: return@withContext null
         when (type) {
             ArchiveType.ZIP -> {
-                archive.inputStream().use { input ->
-                    BufferedInputStream(input).use { buffered ->
-                        ZipArchiveInputStream(buffered).use { zip ->
-                            while (true) {
-                                val entry = zip.nextEntry ?: return@withContext null
-                                if (entry.isDirectory) continue
-                                if (entry.name == entryName || entry.name.endsWith("/$entryName")) {
-                                    return@withContext zip.readBytes()
-                                }
-                            }
-                        }
-                    }
+                JdkZipFile(archive).use { zip ->
+                    val entry = zip.getEntry(entryName) ?: zip.getEntry(entryName.substringAfterLast('/'))
+                    if (entry != null) zip.getInputStream(entry).use { it.readBytes() } else null
                 }
-                @Suppress("UNREACHABLE_CODE")
-                null
             }
             ArchiveType.RAR -> {
                 var result: ByteArray? = null
@@ -324,6 +311,57 @@ class ArchiveExtractor @Inject constructor() {
             }
         }
     }
+
+    /**
+     * 将压缩包内单个图片条目解压到指定文件（原子写入）。
+     * ZIP 使用 [JdkZipFile] 随机访问（O(1) 定位条目）；RAR 顺序搜索到目标条目。
+     * 用于页级磁盘缓存：Coil 直接读取缓存后的文件。
+     *
+     * @param outFile 已经过安全化处理的输出文件（父目录已存在）
+     * @return 写入成功返回 true
+     */
+    suspend fun extractImageTo(archive: File, entryName: String, outFile: File): Boolean =
+        withContext(Dispatchers.IO) {
+            val type = detectType(archive.name) ?: return@withContext false
+            when (type) {
+                ArchiveType.ZIP -> {
+                    JdkZipFile(archive).use { zip ->
+                        val entry = zip.getEntry(entryName) ?: zip.getEntry(entryName.substringAfterLast('/'))
+                            ?: return@withContext false
+                        val tmp = File(outFile.parentFile, outFile.name + ".tmp")
+                        try {
+                            zip.getInputStream(entry).use { input ->
+                                FileOutputStream(tmp).use { out -> input.copyTo(out) }
+                            }
+                            tmp.renameTo(outFile)
+                            true
+                        } catch (e: Exception) {
+                            tmp.delete()
+                            false
+                        }
+                    }
+                }
+                ArchiveType.RAR -> {
+                    var ok = false
+                    Archive(archive).use { a ->
+                        for (header in a.fileHeaders as List<FileHeader>) {
+                            if (!header.isDirectory && header.getFileNameString() == entryName) {
+                                val tmp = File(outFile.parentFile, outFile.name + ".tmp")
+                                try {
+                                    FileOutputStream(tmp).use { out -> a.extractFile(header, out) }
+                                    tmp.renameTo(outFile)
+                                    ok = true
+                                } catch (e: Exception) {
+                                    tmp.delete()
+                                }
+                                break
+                            }
+                        }
+                    }
+                    ok
+                }
+            }
+        }
 
     /**
      * 流式解码封面：将第一张图片条目写入临时文件，再用 BitmapFactory + inSampleSize 解码，
@@ -438,4 +476,7 @@ class ArchiveExtractor @Inject constructor() {
     }
 }
 
-enum class ArchiveType { ZIP, RAR }
+enum class ArchiveType { ZIP, RAR;
+    val isZip: Boolean get() = this == ZIP
+    val isRar: Boolean get() = this == RAR
+}

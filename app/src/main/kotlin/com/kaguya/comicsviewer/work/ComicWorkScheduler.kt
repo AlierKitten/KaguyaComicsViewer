@@ -7,16 +7,18 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** 调度下载 + 解压的链式工作。 */
+/** 调度下载（+ 解压）的链式工作。 */
 @Singleton
 class ComicWorkScheduler @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val extractor: ArchiveExtractor
 ) {
     companion object {
         private const val TAG = "ComicWorkScheduler"
@@ -43,6 +45,16 @@ class ComicWorkScheduler @Inject constructor(
             .setInputData(downloadInput)
             .addTag(tagFor(comic.id))
             .build()
+
+        val isZip = extractor.detectType(comic.filePath)?.isZip == true
+        if (isZip) {
+            // ZIP/CBZ：下载完即 READY，无需解压，仅调度下载
+            WorkManager.getInstance(context)
+                .beginUniqueWork(workName(comic.id), ExistingWorkPolicy.REPLACE, download)
+                .enqueue()
+            Log.d(TAG, "WorkManager enqueued: download only (ZIP direct-read) for comicId=${comic.id}")
+            return
+        }
 
         val extract = OneTimeWorkRequestBuilder<ExtractComicWorker>()
             .setInputData(

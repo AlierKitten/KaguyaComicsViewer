@@ -4,6 +4,7 @@ import com.kaguya.comicsviewer.data.local.dao.ComicDao
 import com.kaguya.comicsviewer.data.local.dao.ComicSourceDao
 import com.kaguya.comicsviewer.data.local.entity.toDomain
 import com.kaguya.comicsviewer.data.local.entity.toEntity
+import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
@@ -21,7 +22,8 @@ import javax.inject.Singleton
 class ComicRepositoryImpl @Inject constructor(
     private val sourceDao: ComicSourceDao,
     private val comicDao: ComicDao,
-    private val cacheDirs: CacheDirectories
+    private val cacheDirs: CacheDirectories,
+    private val extractor: ArchiveExtractor
 ) : ComicRepository {
 
     override fun observeSources(): Flow<List<ComicSource>> =
@@ -109,6 +111,7 @@ class ComicRepositoryImpl @Inject constructor(
             entity.archiveFile?.let { p -> runCatching { java.io.File(p).delete() } }
             entity.extractedDir?.let { p -> runCatching { java.io.File(p).deleteRecursively() } }
         }
+        cacheDirs.clearPageCache(comicId)
         comicDao.deleteCache(comicId)
     }
 
@@ -120,15 +123,37 @@ class ComicRepositoryImpl @Inject constructor(
 
     override suspend fun listPages(comicId: Long): List<ComicPage> {
         val cache = comicDao.findCache(comicId)?.toDomain() ?: return emptyList()
-        if (cache.state != CacheState.READY || cache.extractedDir.isNullOrBlank()) return emptyList()
-        val dir = java.io.File(cache.extractedDir)
-        if (!dir.isDirectory) return emptyList()
-        val files = dir.listFiles { f -> f.isFile && f.isImageFile() }
-            ?.sortedBy { it.name }
-            ?: return emptyList()
-        return files.mapIndexed { index, file ->
-            ComicPage(comicId = comicId, index = index, path = file.absolutePath)
+        if (cache.state != CacheState.READY) return emptyList()
+
+        // RAR：整包已解压到 extractedDir，直接列目录图片文件
+        if (!cache.extractedDir.isNullOrBlank()) {
+            val dir = java.io.File(cache.extractedDir)
+            if (!dir.isDirectory) return emptyList()
+            val files = dir.listFiles { f -> f.isFile && f.isImageFile() }
+                ?.sortedBy { it.name }
+                ?: return emptyList()
+            return files.mapIndexed { index, file ->
+                ComicPage(comicId = comicId, index = index, path = file.absolutePath)
+            }
         }
+
+        // ZIP/CBZ：保留压缩包，按需解压单页（直接读压缩包内条目列表）
+        val archivePath = cache.archiveFile
+        if (!archivePath.isNullOrBlank() && extractor.detectType(java.io.File(archivePath).name)?.isZip == true) {
+            val archiveFile = java.io.File(archivePath)
+            if (!archiveFile.isFile) return emptyList()
+            val entries = extractor.listImageEntries(archiveFile)
+            return entries.mapIndexed { index, entryName ->
+                ComicPage(
+                    comicId = comicId,
+                    index = index,
+                    archivePath = archivePath,
+                    entryName = entryName
+                )
+            }
+        }
+
+        return emptyList()
     }
 
     override suspend fun updatePageCount(comicId: Long, count: Int) {

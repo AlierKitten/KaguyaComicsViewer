@@ -27,6 +27,10 @@ class CacheDirectories @Inject constructor(
     val covers: File
         get() = File(root, "covers").apply { if (!exists()) mkdirs() }
 
+    /** 页级 LRU 磁盘缓存目录（按需解压的单页图片）。 */
+    val pageCache: File
+        get() = File(root, "pagecache").apply { if (!exists()) mkdirs() }
+
     fun archiveFile(comicId: Long, originalName: String? = null): File {
         val ext = originalName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
         val suffix = if (ext != null) ".$ext" else ".archive"
@@ -35,11 +39,23 @@ class CacheDirectories @Inject constructor(
     fun extractedDir(comicId: Long): File = File(extracted, "comic_$comicId")
     fun coverFile(comicId: Long): File = File(covers, "comic_$comicId.jpg")
 
+    /** 某本漫画的页级缓存目录（不存在则创建）。 */
+    fun pageCacheDir(comicId: Long): File = File(pageCache, "comic_$comicId").apply {
+        if (!exists()) mkdirs()
+    }
+
+    /** 删除某本漫画的页级缓存目录。 */
+    fun clearPageCache(comicId: Long) {
+        val dir = File(pageCache, "comic_$comicId")
+        if (dir.exists()) dir.deleteRecursively()
+    }
+
     /** 缓存总占用（字节），不包含封面。 */
     fun totalSizeBytes(): Long {
         var size = 0L
         if (archives.exists()) size += archives.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         if (extracted.exists()) size += extracted.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        if (pageCache.exists()) size += pageCache.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         return size
     }
 

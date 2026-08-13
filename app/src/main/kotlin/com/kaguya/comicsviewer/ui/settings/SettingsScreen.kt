@@ -16,8 +16,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Brightness6
 import androidx.compose.material.icons.outlined.CleaningServices
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -29,6 +30,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -145,7 +147,25 @@ fun SettingsScreen(
                 )
             }
 
-            SectionCard(title = "存储", icon = Icons.Outlined.CleaningServices) {
+            SectionCard(
+                title = "存储",
+                icon = Icons.Outlined.CleaningServices,
+                action = {
+                    IconButton(
+                        onClick = viewModel::refreshStorage,
+                        enabled = !state.isRefreshing
+                    ) {
+                        if (state.isRefreshing) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Icon(Icons.Outlined.Refresh, contentDescription = "刷新占用")
+                        }
+                    }
+                }
+            ) {
                 Text("缓存：${state.cacheSize}", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 Button(
@@ -236,6 +256,7 @@ fun SettingsScreen(
 private fun SectionCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    action: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -243,7 +264,8 @@ private fun SectionCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.size(8.dp))
-                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                action?.invoke()
             }
             Spacer(Modifier.height(8.dp))
             content()

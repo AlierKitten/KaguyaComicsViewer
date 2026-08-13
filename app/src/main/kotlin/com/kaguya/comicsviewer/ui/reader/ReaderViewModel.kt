@@ -6,9 +6,11 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kaguya.comicsviewer.data.cache.PageImageCache
 import com.kaguya.comicsviewer.data.prefs.AppSettings
 import com.kaguya.comicsviewer.data.prefs.SettingsRepository
 import com.kaguya.comicsviewer.data.repository.ComicRepository
+import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicPage
 import com.kaguya.comicsviewer.domain.model.ReadingMode
@@ -17,8 +19,10 @@ import com.kaguya.comicsviewer.util.CacheDirectories
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -43,6 +47,8 @@ class ReaderViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val saveProgress: SaveProgressUseCase,
     private val cacheDirs: CacheDirectories,
+    private val pageCache: PageImageCache,
+    private val extractor: ArchiveExtractor,
     private val savedState: SavedStateHandle
 ) : ViewModel() {
 
@@ -51,6 +57,10 @@ class ReaderViewModel @Inject constructor(
     private val _state = MutableStateFlow(ReaderUiState())
 
     val state: StateFlow<ReaderUiState> = _state.asStateFlow()
+
+    /** 一次性跳转事件：Screen 消费后滚动到该页。 */
+    private val _jumpEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    val jumpEvent = _jumpEvent.asSharedFlow()
 
     private val errorHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e("ReaderViewModel", "Error loading comic", throwable)
@@ -79,22 +89,32 @@ class ReaderViewModel @Inject constructor(
                 comic = updatedComic, pages = list, page = page, mode = s.readingMode,
                 keepScreenOn = s.keepScreenOn, isLoading = false, error = null
             )
+            // 预取附近页
+            prefetch(page)
         }
     }
 
-    /** 如果封面文件不存在，从解压目录的第一页重新生成 */
+    /** 如果封面文件不存在，从第一页重新生成（ZIP 先从压缩包解出第一页字节）。 */
     private suspend fun ensureCover(comic: Comic?, pages: List<ComicPage>): Comic? {
         if (comic == null || pages.isEmpty()) return comic
         val coverPath = comic.coverPath
         if (coverPath != null && File(coverPath).exists()) return comic
-        // 封面不存在，从第一页生成缩略图
         val firstPage = pages.firstOrNull() ?: return comic
-        val firstPageFile = File(firstPage.path)
-        if (!firstPageFile.exists()) return comic
+        val bytes = withContext(Dispatchers.IO) {
+            runCatching {
+                if (firstPage.path != null) {
+                    File(firstPage.path).takeIf { it.exists() }?.readBytes()
+                } else if (firstPage.isArchive) {
+                    extractor.readEntry(
+                        archive = File(firstPage.archivePath!!),
+                        entryName = firstPage.entryName!!
+                    )
+                } else null
+            }.getOrNull()
+        } ?: return comic
         return withContext(Dispatchers.IO) {
             runCatching {
                 val coverFile = cacheDirs.coverFile(comicId)
-                val bytes = firstPageFile.readBytes()
                 generateThumbnail(bytes, coverFile)
                 val newCoverPath = coverFile.absolutePath
                 val updated = comic.copy(coverPath = newCoverPath)
@@ -127,6 +147,27 @@ class ReaderViewModel @Inject constructor(
         // 读取到最后一页或倒数第二页都算已读完
         val isFinished = page >= (max - 1).coerceAtLeast(0) && max > 0
         viewModelScope.launch { saveProgress(comicId, page, isFinished) }
+        prefetch(page)
+    }
+
+    /** 页面跳转：更新页码并发出一次性跳转事件，由 Screen 滚动到目标页。 */
+    fun jumpTo(p: Int) {
+        val max = (_state.value.pages.size - 1).coerceAtLeast(0)
+        val page = p.coerceIn(0, max)
+        _state.value = _state.value.copy(page = page)
+        val isFinished = page >= (max - 1).coerceAtLeast(0) && max > 0
+        viewModelScope.launch { saveProgress(comicId, page, isFinished) }
+        _jumpEvent.tryEmit(page)
+        prefetch(page)
+    }
+
+    /** 后台预取当前页附近的 ZIP 页到磁盘缓存。 */
+    private fun prefetch(page: Int) {
+        val pages = _state.value.pages
+        if (pages.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            pageCache.prefetch(comicId, page, pages)
+        }
     }
 
     fun next() = goTo(_state.value.page + 1)
