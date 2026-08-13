@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -49,6 +50,7 @@ private data class DisplaySortPrefs(
     val showCovers: Boolean,
     val sortField: ComicSortField,
     val sortAscending: Boolean,
+    val enabledReady: Boolean,
     val enabledIds: Set<Long>
 )
 
@@ -98,8 +100,13 @@ class LibraryViewModel @Inject constructor(
     }
 
     // 启用中的源 id 集合：仅用于 UI 层过滤显示（关闭源 = 隐藏，不删除数据、不重新索引）
-    private val enabledSourceIds =
-        repository.observeSources().map { srcs -> srcs.filter { it.enabled }.map { it.id }.toSet() }
+    // 用 (ready, ids) 携带"是否已就绪"标志：冷启动时 observeSources 尚未 emit 第一帧前，
+    // 默认 enabledIds = emptySet()，若直接用它过滤会把全部漫画误判为"关闭源"而隐藏（显示 0 个）。
+    // 因此未就绪时跳过过滤，待源列表首帧到达后再正常按启用状态隐藏。
+    private val enabledSourceIds: kotlinx.coroutines.flow.Flow<Pair<Boolean, Set<Long>>> =
+        repository.observeSources()
+            .map { srcs -> true to srcs.filter { it.enabled }.map { it.id }.toSet() }
+            .onStart { emit(false to emptySet()) }
 
     // 当前正在加载的漫画进度
     private val _loadingProgress = MutableStateFlow<LoadingProgress?>(null)
@@ -171,8 +178,8 @@ class LibraryViewModel @Inject constructor(
         sortField,
         sortAscending,
         enabledSourceIds
-    ) { dm, scv, sf, asc, enabledIds ->
-        DisplaySortPrefs(dm, scv, sf, asc, enabledIds)
+    ) { dm, scv, sf, asc, (ready, ids) ->
+        DisplaySortPrefs(dm, scv, sf, asc, ready, ids)
     }
 
     fun sortComics(
@@ -192,8 +199,11 @@ class LibraryViewModel @Inject constructor(
         comicsFlow, recentFlow, query, scanning, displaySortPrefs
     ) { comics, recent, q, sc, prefs ->
         // 按源的启用/关闭做纯 UI 过滤：关闭的源仅隐藏，不删除数据、不重新索引
-        val visibleComics = comics.filter { it.comic.sourceId in prefs.enabledIds }
-        val visibleRecent = recent.filter { it.comic.sourceId in prefs.enabledIds }
+        // enabledReady 为 false（源列表尚未首帧就绪）时跳过过滤，避免冷启动空集合误杀全部漫画
+        val visibleComics = if (prefs.enabledReady)
+            comics.filter { it.comic.sourceId in prefs.enabledIds } else comics
+        val visibleRecent = if (prefs.enabledReady)
+            recent.filter { it.comic.sourceId in prefs.enabledIds } else recent
         val filtered = if (q.isBlank()) {
             visibleComics
         } else {

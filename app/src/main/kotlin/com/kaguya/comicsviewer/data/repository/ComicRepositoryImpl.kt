@@ -42,7 +42,20 @@ class ComicRepositoryImpl @Inject constructor(
     override suspend fun listEnabledSources(): List<ComicSource> =
         sourceDao.listEnabled().map { it.toDomain() }
 
-    override suspend fun upsertSource(source: ComicSource): Long = sourceDao.upsert(source.toEntity())
+    override suspend fun upsertSource(source: ComicSource): Long {
+        // 不能用 sourceDao.upsert(REPLACE)：REPLACE = DELETE + INSERT 同一源行，
+        // 而 comics 表对 source_id 定义了 onDelete=CASCADE，会导致该源下所有已 index 的
+        // 漫画被级联删除（典型表现：关闭/重新启用源后退出重启，漫画库变 0 需重新扫描）。
+        // 改为"已存在则 update（保留原行，不触级联），不存在才 insert"。
+        val entity = source.toEntity()
+        val existing = sourceDao.findById(entity.id)
+        return if (existing != null) {
+            sourceDao.update(entity)
+            entity.id
+        } else {
+            sourceDao.upsert(entity)
+        }
+    }
 
     override suspend fun deleteSource(id: Long) = sourceDao.deleteById(id)
 
