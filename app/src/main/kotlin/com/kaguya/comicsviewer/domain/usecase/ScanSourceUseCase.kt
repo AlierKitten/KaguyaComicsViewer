@@ -50,7 +50,8 @@ class ScanSourceUseCase @Inject constructor(
     suspend operator fun invoke(
         source: ComicSource,
         onPhase1: (Int) -> Unit = {},
-        onPhase2: (String) -> Unit = {}
+        onPhase2: (String) -> Unit = {},
+        indexCover: Boolean = true
     ): Int {
         Log.d(TAG, "scan start: source='${source.name}', type=${source.type}")
         val scanner = when (source.type) {
@@ -102,10 +103,10 @@ class ScanSourceUseCase @Inject constructor(
         // ── Phase 2: 后台获取文件大小 + 生成封面 ──
         if (cancelled.get()) return found.size
         val needsSize = found.filter { it.sizeBytes == 0L }
-        val needsCover = found.filter { d ->
+        val needsCover = if (indexCover) found.filter { d ->
             val prev = existingByPath[d.relativePath]
             prev?.coverPath == null
-        }
+        } else emptyList()
 
         if (needsSize.isEmpty() && needsCover.isEmpty()) {
             Log.d(TAG, "phase2: nothing to enrich")
@@ -135,7 +136,7 @@ class ScanSourceUseCase @Inject constructor(
         }
 
         // 2b. 生成封面（带自动重试：统计未获取封面数，有减少趋势就继续重试，直到不再减少或全部完成）
-        if (needsCover.isNotEmpty()) {
+        if (indexCover && needsCover.isNotEmpty()) {
             // pending 持有「漫画 + 原始发现项」对，失败时留到下一轮重试
             val comicsByPath = repository.listComicsBySources(listOf(source.id)).associateBy { it.filePath }
             var pending = needsCover.mapNotNull { d -> comicsByPath[d.relativePath]?.let { c -> c to d } }

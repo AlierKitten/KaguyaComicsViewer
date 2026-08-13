@@ -17,6 +17,7 @@ data class AppSettings(
     val dynamicColor: Boolean = true,
     val libraryDisplayMode: Int = 0,
     val showCovers: Boolean = true,
+    val indexCoverOnScan: Boolean = true,
     val sortField: ComicSortField = ComicSortField.NAME,
     val sortAscending: Boolean = true,
     val hideFromRecents: Boolean = false
@@ -35,6 +36,7 @@ class SettingsRepository @Inject constructor() {
     private val keyDynamicColor = "dynamic_color"
     private val keyLibraryDisplayMode = "library_display_mode"
     private val keyShowCovers = "show_covers"
+    private val keyIndexCoverOnScan = "index_cover_on_scan"
     private val keySortField = "sort_field"
     private val keySortAscending = "sort_ascending"
     private val keyHideFromRecents = "hide_from_recents"
@@ -49,6 +51,7 @@ class SettingsRepository @Inject constructor() {
         dynamicColor = kv.decodeBool(keyDynamicColor, true),
         libraryDisplayMode = kv.decodeInt(keyLibraryDisplayMode, 0),
         showCovers = kv.decodeBool(keyShowCovers, true),
+        indexCoverOnScan = kv.decodeBool(keyIndexCoverOnScan, true),
         sortField = kv.decodeString(keySortField)?.let { runCatching { ComicSortField.valueOf(it) }.getOrNull() }
             ?: ComicSortField.NAME,
         sortAscending = kv.decodeBool(keySortAscending, true),
@@ -99,6 +102,11 @@ class SettingsRepository @Inject constructor() {
 
     fun setShowCovers(enabled: Boolean) {
         kv.encode(keyShowCovers, enabled)
+        emit()
+    }
+
+    fun setIndexCoverOnScan(enabled: Boolean) {
+        kv.encode(keyIndexCoverOnScan, enabled)
         emit()
     }
 

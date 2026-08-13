@@ -70,6 +70,7 @@ class SettingsViewModel @Inject constructor(
     fun setDarkMode(enabled: Boolean) = viewModelScope.launch { settings.setDarkMode(enabled) }
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { settings.setDynamicColor(enabled) }
     fun setShowCovers(enabled: Boolean) = viewModelScope.launch { settings.setShowCovers(enabled) }
+    fun setIndexCoverOnScan(enabled: Boolean) = viewModelScope.launch { settings.setIndexCoverOnScan(enabled) }
     fun setHideFromRecents(enabled: Boolean) = viewModelScope.launch { settings.setHideFromRecents(enabled) }
 
     fun clearAllCache() {

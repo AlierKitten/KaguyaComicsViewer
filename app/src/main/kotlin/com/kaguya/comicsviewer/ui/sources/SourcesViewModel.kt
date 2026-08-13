@@ -3,6 +3,7 @@ package com.kaguya.comicsviewer.ui.sources
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kaguya.comicsviewer.data.prefs.SettingsRepository
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.smb.SmbClient
 import com.kaguya.comicsviewer.domain.model.ComicSource
@@ -34,6 +35,7 @@ data class SourceRow(
 class SourcesViewModel @Inject constructor(
     private val repository: ComicRepository,
     private val scanUseCase: ScanSourceUseCase,
+    private val settings: SettingsRepository,
     val smbClient: SmbClient
 ) : ViewModel() {
 
@@ -146,7 +148,8 @@ class SourcesViewModel @Inject constructor(
                         if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
                         else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
                     },
-                    onPhase2 = { msg -> _toastEvents.tryEmit(msg) }
+                    onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
+                    indexCover = settings.settings.value.indexCoverOnScan
                 )
                 if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
             } catch (e: Exception) {
@@ -175,7 +178,8 @@ class SourcesViewModel @Inject constructor(
                         val count = scanUseCase(
                             s,
                             onPhase1 = { n -> totalFound += n },
-                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") }
+                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") },
+                            indexCover = settings.settings.value.indexCoverOnScan
                         )
                     } catch (e: Exception) {
                         Log.e("SourcesViewModel", "scan failed for ${s.name}", e)
@@ -212,7 +216,8 @@ class SourcesViewModel @Inject constructor(
                     if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
                     else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
                 },
-                onPhase2 = { msg -> _toastEvents.tryEmit(msg) }
+                onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
+                indexCover = settings.settings.value.indexCoverOnScan
             )
             if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
         } catch (e: Exception) {

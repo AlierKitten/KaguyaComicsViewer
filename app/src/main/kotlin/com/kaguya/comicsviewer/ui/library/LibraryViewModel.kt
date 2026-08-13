@@ -259,7 +259,8 @@ class LibraryViewModel @Inject constructor(
                         val count = scanUseCase(
                             s,
                             onPhase1 = { n -> totalFound += n },
-                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") }
+                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") },
+                            indexCover = settings.settings.value.indexCoverOnScan
                         )
                     } catch (e: Exception) {
                         Log.e("LibraryViewModel", "scan failed for ${s.name}", e)
@@ -288,7 +289,8 @@ class LibraryViewModel @Inject constructor(
                             if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
                             else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
                         },
-                        onPhase2 = { msg -> _toastEvents.tryEmit(msg) }
+                        onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
+                        indexCover = settings.settings.value.indexCoverOnScan
                     )
                 }
             } catch (e: Exception) {

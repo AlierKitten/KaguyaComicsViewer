@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Brightness6
 import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -128,7 +129,7 @@ fun SettingsScreen(
                 )
             }
 
-            SectionCard(title = "存储", icon = Icons.Outlined.CleaningServices) {
+            SectionCard(title = "封面", icon = Icons.Outlined.Image) {
                 ToggleRow(
                     title = "显示封面",
                     subtitle = "在漫画库中显示封面缩略图，关闭后显示默认图标",
@@ -136,6 +137,15 @@ fun SettingsScreen(
                     onChange = viewModel::setShowCovers
                 )
                 Spacer(Modifier.height(12.dp))
+                ToggleRow(
+                    title = "扫描时索引封面",
+                    subtitle = "扫描文件源时自动生成封面缩略图，关闭后扫描将跳过封面生成（更快）",
+                    checked = state.settings.indexCoverOnScan,
+                    onChange = viewModel::setIndexCoverOnScan
+                )
+            }
+
+            SectionCard(title = "存储", icon = Icons.Outlined.CleaningServices) {
                 Text("缓存：${state.cacheSize}", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 Button(
