@@ -85,6 +85,12 @@ class ReaderViewModel @Inject constructor(
             // 检查封面文件是否存在，不存在则重新生成
             val updatedComic = ensureCover(comic, list)
 
+            // SMB 源扫描阶段未计算页数（pageCount=0），阅读器打开后这里把实时列举出的
+            // 总页数写回数据库，保证"继续阅读"等列表页能显示正确总页数而非 "1/? 页"。
+            if (list.isNotEmpty() && comic != null && comic.pageCount != list.size) {
+                runCatching { repository.updatePageCount(comicId, list.size) }
+            }
+
             _state.value = ReaderUiState(
                 comic = updatedComic, pages = list, page = page, mode = s.readingMode,
                 keepScreenOn = s.keepScreenOn, isLoading = false, error = null
