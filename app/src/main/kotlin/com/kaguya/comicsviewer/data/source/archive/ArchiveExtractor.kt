@@ -1,482 +1,304 @@
 package com.kaguya.comicsviewer.data.source.archive
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import com.github.junrar.Archive
-import com.github.junrar.rarfile.FileHeader
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.apache.commons.compress.archivers.ArchiveEntry
-import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
-import java.io.BufferedInputStream
+import me.zhanghai.android.libarchive.Archive
+import me.zhanghai.android.libarchive.ArchiveEntry
+import me.zhanghai.android.libarchive.ArchiveException
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
-import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.util.zip.ZipFile as JdkZipFile
 
 /**
- * 漫画压缩包解压器，支持 ZIP/CBZ/RAR。
- *
- * - ZIP/CBZ：流式解压，按需写入磁盘
- * - RAR：使用 junrar 解压
+ * 基于 libarchive（原生 so）的压缩包读取器。
+ * libarchive 用 C 实现，支持 ZIP / CBZ / RAR / RAR5 / 7z 等格式，
  */
 @Singleton
+@Suppress("unused")
 class ArchiveExtractor @Inject constructor() {
 
-    /** 识别压缩包格式。 */
-    fun detectType(name: String): ArchiveType? {
-        val n = name.lowercase(Locale.ROOT)
-        return when {
-            n.endsWith(".cbz") || n.endsWith(".zip") -> ArchiveType.ZIP
-            n.endsWith(".cbr") || n.endsWith(".rar") -> ArchiveType.RAR
-            else -> null
-        }
+    enum class ArchiveType { ZIP, RAR;
+        val isZip get() = this == ZIP
+        val isRar get() = this == RAR
     }
 
-    /**
-     * 列出压缩包内图片条目（按自然顺序）。
-     * 用于：在下载/解压前估算页数；以及解压阶段建立索引。
-     */
-    suspend fun listImageEntries(archive: File): List<String> = withContext(Dispatchers.IO) {
-        val type = detectType(archive.name) ?: return@withContext emptyList()
-        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
-        when (type) {
-            ArchiveType.ZIP -> {
-                val names = mutableListOf<String>()
-                archive.inputStream().use { input ->
-                    BufferedInputStream(input).use { buffered ->
-                        ZipArchiveInputStream(buffered).use { zip ->
-                            while (true) {
-                                val entry = zip.nextEntry ?: break
-                                if (entry.isDirectory) continue
-                                val name = entry.name.substringAfterLast('/')
-                                if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                                    names += entry.name
-                                }
-                            }
-                        }
-                    }
-                }
-                names
-            }
-            ArchiveType.RAR -> {
-                val names = mutableListOf<String>()
-                Archive(archive).use { a ->
-                    for (header in a.fileHeaders) {
-                        if (header.isDirectory) continue
-                        val fn = header.getFileNameString()
-                        val name = fn.substringAfterLast('/')
-                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                            names += fn
-                        }
-                    }
-                }
-                names
-            }
-        }.sortedWith(NATURAL_ORDER)
+    // region 公共接口（对外签名保持不变）
+
+    fun detectType(name: String): ArchiveType? = when {
+        name.endsWith(".cbz", true) || name.endsWith(".zip", true) -> ArchiveType.ZIP
+        name.endsWith(".cbr", true) || name.endsWith(".rar", true) -> ArchiveType.RAR
+        else -> null
     }
 
-    /**
-     * 解压压缩包到目标目录，仅写入图片文件。
-     * 返回写入的文件数。
-     */
-    suspend fun extractImages(archive: File, targetDir: File): Int = withContext(Dispatchers.IO) {
-        if (!targetDir.exists()) targetDir.mkdirs()
-        val type = detectType(archive.name) ?: return@withContext 0
-        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
-        when (type) {
-            ArchiveType.ZIP -> {
-                var count = 0
-                archive.inputStream().use { input ->
-                    BufferedInputStream(input).use { buffered ->
-                        ZipArchiveInputStream(buffered).use { zip ->
-                            while (true) {
-                                val entry: ArchiveEntry = zip.nextEntry ?: break
-                                if (entry.isDirectory) continue
-                                val baseName = entry.name.substringAfterLast('/')
-                                if (baseName.isBlank()) continue
-                                if (imageExts.none { baseName.lowercase().endsWith(".$it") }) continue
-                                val outFile = safeOutputFile(targetDir, baseName)
-                                outFile.outputStream().use { out -> zip.copyTo(out) }
-                                count++
-                            }
-                        }
-                    }
-                }
-                count
-            }
-            ArchiveType.RAR -> {
-                var count = 0
-                Archive(archive).use { a ->
-                    for (header in a.fileHeaders as List<FileHeader>) {
-                        if (header.isDirectory) continue
-                        val baseName = header.getFileNameString().substringAfterLast('/')
-                        if (baseName.isBlank()) continue
-                        if (imageExts.none { baseName.lowercase().endsWith(".$it") }) continue
-                        val outFile = safeOutputFile(targetDir, baseName)
-                        FileOutputStream(outFile).use { out -> a.extractFile(header, out) }
-                        count++
-                    }
-                }
-                count
+    /** 列出压缩包中所有图片条目（按文件名），用于"下载即 READY"的 ZIP 直接读取路径。 */
+    fun listImageEntries(archive: File): List<String> {
+        val result = mutableListOf<String>()
+        open(archive) { archivePtr ->
+            walkEntries(archivePtr) { entry ->
+                val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                if (isImageName(path)) result.add(path)
+                false
             }
         }
+        return result
     }
 
     /**
-     * 解压单个文件到磁盘外的输出流。
+     * 将单个图片条目解压到 outFile（流式写，避免整张图片载入内存）。
      */
-    suspend fun extractImage(archive: File, entryName: String, out: File): Boolean =
-        withContext(Dispatchers.IO) {
-            val type = detectType(archive.name) ?: return@withContext false
-            when (type) {
-                ArchiveType.ZIP -> {
-                    archive.inputStream().use { input ->
-                        BufferedInputStream(input).use { buffered ->
-                            ZipArchiveInputStream(buffered).use { zip ->
-                                while (true) {
-                                    val entry = zip.nextEntry ?: return@withContext false
-                                    if (entry.isDirectory) continue
-                                    if (entry.name == entryName || entry.name.endsWith("/$entryName")) {
-                                        out.outputStream().use { o -> zip.copyTo(o) }
-                                        return@withContext true
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    @Suppress("UNREACHABLE_CODE")
-                    false
-                }
-                ArchiveType.RAR -> {
-                    Archive(archive).use { a ->
-                        for (header in a.fileHeaders as List<FileHeader>) {
-                            if (!header.isDirectory && header.getFileNameString() == entryName) {
-                                java.io.FileOutputStream(out).use { fos -> a.extractFile(header, fos) }
-                                return@withContext true
-                            }
-                        }
-                    }
+    fun extractImageTo(archive: File, entryName: String, outFile: File): Boolean {
+        var extracted = false
+        open(archive) { archivePtr ->
+            walkEntries(archivePtr) { entry ->
+                val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                if (path == entryName) {
+                    extractCurrentEntry(archivePtr, outFile)
+                    extracted = true
+                    true
+                } else {
                     false
                 }
             }
         }
+        return extracted
+    }
 
-    /** 读取第一张图片作为封面（流式解码 + 缩放，避免 OOM）。 */
+    /**
+     * 将整个压缩包（仅图片条目）解压到 target 目录。
+     * 目前 RAR 整包下载后走此路径；ZIP 已改为按需读取，不再调用。
+     * @return 解压出的图片数量
+     */
+    fun extractImages(archive: File, target: File): Int {
+        var count = 0
+        open(archive) { archivePtr ->
+            walkEntries(archivePtr) { entry ->
+                val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                if (!isImageName(path)) return@walkEntries false
+                val name = path.substringAfterLast('/').substringAfterLast('\\')
+                extractCurrentEntry(archivePtr, File(target, name))
+                count++
+                false
+            }
+        }
+        Log.d("ArchiveExtractor", "解压完成，共 $count 张图片到 ${target.absolutePath}")
+        return count
+    }
+
+    /** 读取单个图片条目到内存（用于首图/封面场景）。 */
+    fun readEntry(archive: File, entryName: String): ByteArray? {
+        var bytes: ByteArray? = null
+        open(archive) { archivePtr ->
+            walkEntries(archivePtr) { entry ->
+                val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                if (path == entryName) {
+                    bytes = readCurrentEntry(archivePtr)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        return bytes
+    }
+
+    // endregion
+
+    // region 封面（通过本地文件或任意 InputStream 读取）
+
+    /** 读取本地 archive 文件的封面（解压第一张图片的原始字节）。 */
     suspend fun readCover(archive: File): ByteArray? = withContext(Dispatchers.IO) {
-        decodeCoverBitmap(archive, archive.name)
+        val temp = File.createTempFile("cover_", ".tmp")
+        try {
+            if (!extractFirstImage(archive, temp)) return@withContext null
+            temp.readBytes()
+        } finally {
+            temp.delete()
+        }
     }
 
-    /** 读取第一张图片作为封面。[fileName] 用于检测压缩包类型（当 [archive] 是临时文件时扩展名可能不正确）。 */
-    suspend fun readCover(archive: File, fileName: String): ByteArray? = withContext(Dispatchers.IO) {
-        decodeCoverBitmap(archive, fileName)
+    /** 读取本地 archive 文件的封面（带已知文件名）。 */
+    suspend fun readCover(archive: File, fileName: String): ByteArray? {
+        if (detectType(fileName) == null) return null
+        return readCover(archive)
     }
 
     /**
-     * 从压缩包输入流读取第一张图片作为封面（流式，不落盘整包）。
-     * 适用于 ZIP/CBZ：直接包裹 [ZipArchiveInputStream] 顺序读取，找到首个图片条目即解码，
-     * 无需等待整包传输完成。RAR 不支持纯流式随机访问，会回退到 [fallback]（例如落盘临时文件后调 [readCover]）。
-     *
-     * @param fileName  用于检测压缩包类型（扩展名）
-     * @param fallback  当类型需要随机访问（RAR）时调用，参数为已可读的输入流（若无法重复读取可返回 null）
+     * 从任意 InputStream（SAF / SMB 等远程或 ContentProvider 源）读取封面原始字节。
+     * 使用 libarchive 的回调式 readOpen 直接从流解压，无需本地文件路径。
      */
     suspend fun readCoverFromStream(
         input: InputStream,
-        fileName: String,
-        fallback: suspend (InputStream) -> ByteArray? = { null }
+        fileName: String
     ): ByteArray? = withContext(Dispatchers.IO) {
-        when (detectType(fileName)) {
-            ArchiveType.ZIP -> decodeCoverBitmapFromStream(input, fileName)
-            ArchiveType.RAR -> fallback(input)
-            null -> null
-        }
-    }
-
-    /** 流式解码 ZIP/CBZ 封面：顺序读取首个图片条目，边读边解，找到即停。 */
-    private fun decodeCoverBitmapFromStream(input: InputStream, fileName: String): ByteArray? {
-        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
-        val type = detectType(fileName) ?: return null
-        if (type != ArchiveType.ZIP) return null
-        val buffered = if (input is BufferedInputStream) input else BufferedInputStream(input, 256 * 1024)
-        val tempImg = File.createTempFile("cover_img_", ".tmp")
+        if (detectType(fileName) == null) return@withContext null
+        val temp = File.createTempFile("cover_", ".tmp")
         try {
-            var found = false
-            buffered.use { bis ->
-                ZipArchiveInputStream(bis).use { zip ->
-                    while (!found) {
-                        val entry = zip.nextEntry ?: break
-                        if (entry.isDirectory) continue
-                        val name = entry.name.substringAfterLast('/')
-                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                            FileOutputStream(tempImg).use { out -> zip.copyTo(out) }
-                            found = true
-                        }
-                    }
-                }
+            val ok = openFromStream(input) { archivePtr ->
+                extractFirstImageFromOpen(archivePtr, temp)
             }
-            if (!found) return null
-            return decodeBitmapToFile(tempImg)
-        } catch (e: Exception) {
-            null
+            if (!ok) return@withContext null
+            temp.readBytes()
         } finally {
-            tempImg.delete()
+            temp.delete()
         }
-        return null
     }
 
-    /** 将已落盘的临时图片 [tempImg] 解码、缩放并压缩为封面 JPEG 字节。 */
-    private fun decodeBitmapToFile(tempImg: File): ByteArray? {
+    // endregion
+
+    // region libarchive 遍历封装
+
+    private inline fun walkEntries(archivePtr: Long, onEntry: (Long) -> Boolean) {
+        var entry: Long
+        while (runCatching { Archive.readNextHeader(archivePtr) }
+                .getOrNull()
+                .also { entry = it ?: 0L } != 0L
+        ) {
+            if (ArchiveEntry.filetype(entry) and ArchiveEntry.AE_IFMT != ArchiveEntry.AE_IFREG) continue
+            if (onEntry(entry)) break
+        }
+    }
+
+    private inline fun open(archive: File, block: (Long) -> Unit) {
+        openFromStream(null, archive, block)
+    }
+
+    private inline fun openFromStream(
+        stream: InputStream?,
+        archiveFile: File? = null,
+        block: (Long) -> Unit
+    ): Boolean {
+        val archivePtr = Archive.readNew()
         try {
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(tempImg.absolutePath, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
-            val targetSize = 480
-            val maxDim = maxOf(opts.outWidth, opts.outHeight)
-            opts.inSampleSize = if (maxDim > targetSize) maxDim / targetSize else 1
-            opts.inJustDecodeBounds = false
-            val bitmap = BitmapFactory.decodeFile(tempImg.absolutePath, opts) ?: return null
-            val baos = ByteArrayOutputStream(64 * 1024)
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-            bitmap.recycle()
-            return baos.toByteArray()
-        } catch (e: Exception) {
-            return null
-        }
-    }
-
-    suspend fun readEntry(archive: File, entryName: String): ByteArray? = withContext(Dispatchers.IO) {
-        readEntryInternal(archive, entryName, archive.name)
-    }
-
-    private suspend fun listImageEntriesInternal(archive: File, fileName: String): List<String> = withContext(Dispatchers.IO) {
-        val type = detectType(fileName) ?: return@withContext emptyList()
-        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
-        when (type) {
-            ArchiveType.ZIP -> {
-                val names = mutableListOf<String>()
-                JdkZipFile(archive).use { zip ->
-                    val entries = zip.entries()
-                    while (entries.hasMoreElements()) {
-                        val entry = entries.nextElement()
-                        if (entry.isDirectory) continue
-                        val name = entry.name.substringAfterLast('/')
-                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                            names += entry.name
-                        }
-                    }
-                }
-                names
+            Archive.readSupportFormatAll(archivePtr)
+            Archive.readSupportFilterAll(archivePtr)
+            if (stream != null) {
+                readOpenStream(archivePtr, stream)
+            } else if (archiveFile != null) {
+                Archive.readOpenFileName(
+                    archivePtr,
+                    archiveFile.absolutePath.toByteArray(),
+                    BLOCK_SIZE.toLong()
+                )
+            } else {
+                return false
             }
-            ArchiveType.RAR -> {
-                val names = mutableListOf<String>()
-                Archive(archive).use { a ->
-                    for (header in a.fileHeaders) {
-                        if (header.isDirectory) continue
-                        val fn = header.getFileNameString()
-                        val name = fn.substringAfterLast('/')
-                        if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                            names += fn
-                        }
-                    }
-                }
-                names
-            }
-        }.sortedWith(NATURAL_ORDER)
-    }
-
-    private suspend fun readEntryInternal(archive: File, entryName: String, fileName: String): ByteArray? = withContext(Dispatchers.IO) {
-        val type = detectType(fileName) ?: return@withContext null
-        when (type) {
-            ArchiveType.ZIP -> {
-                JdkZipFile(archive).use { zip ->
-                    val entry = zip.getEntry(entryName) ?: zip.getEntry(entryName.substringAfterLast('/'))
-                    if (entry != null) zip.getInputStream(entry).use { it.readBytes() } else null
-                }
-            }
-            ArchiveType.RAR -> {
-                var result: ByteArray? = null
-                Archive(archive).use { a ->
-                    for (header in a.fileHeaders as List<FileHeader>) {
-                        if (!header.isDirectory && header.getFileNameString() == entryName) {
-                            result = a.getInputStream(header).use { it.readBytes() }
-                            break
-                        }
-                    }
-                }
-                result
-            }
-        }
-    }
-
-    /**
-     * 将压缩包内单个图片条目解压到指定文件（原子写入）。
-     * ZIP 使用 [JdkZipFile] 随机访问（O(1) 定位条目）；RAR 顺序搜索到目标条目。
-     * 用于页级磁盘缓存：Coil 直接读取缓存后的文件。
-     *
-     * @param outFile 已经过安全化处理的输出文件（父目录已存在）
-     * @return 写入成功返回 true
-     */
-    suspend fun extractImageTo(archive: File, entryName: String, outFile: File): Boolean =
-        withContext(Dispatchers.IO) {
-            val type = detectType(archive.name) ?: return@withContext false
-            when (type) {
-                ArchiveType.ZIP -> {
-                    JdkZipFile(archive).use { zip ->
-                        val entry = zip.getEntry(entryName) ?: zip.getEntry(entryName.substringAfterLast('/'))
-                            ?: return@withContext false
-                        val tmp = File(outFile.parentFile, outFile.name + ".tmp")
-                        try {
-                            zip.getInputStream(entry).use { input ->
-                                FileOutputStream(tmp).use { out -> input.copyTo(out) }
-                            }
-                            tmp.renameTo(outFile)
-                            true
-                        } catch (e: Exception) {
-                            tmp.delete()
-                            false
-                        }
-                    }
-                }
-                ArchiveType.RAR -> {
-                    var ok = false
-                    Archive(archive).use { a ->
-                        for (header in a.fileHeaders as List<FileHeader>) {
-                            if (!header.isDirectory && header.getFileNameString() == entryName) {
-                                val tmp = File(outFile.parentFile, outFile.name + ".tmp")
-                                try {
-                                    FileOutputStream(tmp).use { out -> a.extractFile(header, out) }
-                                    tmp.renameTo(outFile)
-                                    ok = true
-                                } catch (e: Exception) {
-                                    tmp.delete()
-                                }
-                                break
-                            }
-                        }
-                    }
-                    ok
-                }
-            }
-        }
-
-    /**
-     * 流式解码封面：将第一张图片条目写入临时文件，再用 BitmapFactory + inSampleSize 解码，
-     * 最后压缩为 JPEG。避免将整张原图加载到内存。
-     */
-    private fun decodeCoverBitmap(archive: File, fileName: String): ByteArray? {
-        val type = detectType(fileName) ?: return null
-        val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic")
-        val tempImg = File.createTempFile("cover_img_", ".tmp")
-        try {
-            // 将第一张图片条目写入临时文件
-            val found = when (type) {
-                ArchiveType.ZIP -> {
-                    var found = false
-                    archive.inputStream().use { input ->
-                        BufferedInputStream(input, 256 * 1024).use { buffered ->
-                            ZipArchiveInputStream(buffered).use { zip ->
-                                while (!found) {
-                                    val entry = zip.nextEntry ?: break
-                                    if (entry.isDirectory) continue
-                                    val name = entry.name.substringAfterLast('/')
-                                    if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                                        FileOutputStream(tempImg).use { out -> zip.copyTo(out) }
-                                        found = true
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    found
-                }
-                ArchiveType.RAR -> {
-                    var ok = false
-                    Archive(archive).use { a ->
-                        for (header in a.fileHeaders as List<FileHeader>) {
-                            if (header.isDirectory) continue
-                            val fn = header.getFileNameString()
-                            val name = fn.substringAfterLast('/')
-                            if (imageExts.any { name.lowercase().endsWith(".$it") }) {
-                                FileOutputStream(tempImg).use { out -> a.extractFile(header, out) }
-                                ok = true
-                                break
-                            }
-                        }
-                    }
-                    ok
-                }
-            }
-            if (!found) return null
-            decodeBitmapToFile(tempImg)
-        } catch (e: Exception) {
-            null
+            block(archivePtr)
+            return true
+        } catch (e: ArchiveException) {
+            Log.w("ArchiveExtractor", "libarchive 读取失败: ${e.message}")
+            return false
+        } catch (e: IOException) {
+            Log.w("ArchiveExtractor", "IO 错误: ${e.message}")
+            return false
         } finally {
-            tempImg.delete()
+            try {
+                Archive.free(archivePtr)
+            } catch (_: Throwable) {
+            }
         }
-        return null
     }
 
-    private fun safeOutputFile(dir: File, name: String): File {
-        val safe = name.replace("..", "_").replace("/", "_").replace("\\", "_")
-        return File(dir, safe)
+    private fun readOpenStream(archivePtr: Long, stream: InputStream) {
+        val buffer = java.nio.ByteBuffer.allocateDirect(BLOCK_SIZE)
+        val tmp = ByteArray(BLOCK_SIZE)
+        val readCallback = object : Archive.ReadCallback<Any?> {
+            override fun onRead(archive: Long, clientData: Any?): java.nio.ByteBuffer? {
+                buffer.clear()
+                val read = try {
+                    stream.read(tmp, 0, BLOCK_SIZE)
+                } catch (e: IOException) {
+                    Log.w("ArchiveExtractor", "流读取失败: ${e.message}")
+                    -1
+                }
+                if (read <= 0) return null
+                buffer.put(tmp, 0, read)
+                buffer.flip()
+                return buffer
+            }
+        }
+        val closeCallback = object : Archive.CloseCallback<Any?> {
+            override fun onClose(archive: Long, clientData: Any?) {
+                try {
+                    stream.close()
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        Archive.readOpen<Any?>(archivePtr, null, null, readCallback, closeCallback)
     }
 
-    private fun InputStream.copyTo(out: java.io.OutputStream) {
-        val buf = ByteArray(64 * 1024)
+    private fun extractFirstImage(archive: File, out: File): Boolean {
+        var ok = false
+        open(archive) { archivePtr ->
+            ok = extractFirstImageFromOpen(archivePtr, out)
+        }
+        return ok
+    }
+
+    private fun extractFirstImageFromOpen(archivePtr: Long, out: File): Boolean {
+        var found = false
+        walkEntries(archivePtr) { entry ->
+            val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+            if (!isImageName(path)) return@walkEntries false
+            extractCurrentEntry(archivePtr, out)
+            found = true
+            true
+        }
+        return found
+    }
+
+    /** 将当前 entry 的数据流式写入文件（不整张载入内存，适合大图）。 */
+    private fun extractCurrentEntry(archivePtr: Long, out: File) {
+        FileOutputStream(out).use { fos ->
+            val buffer = java.nio.ByteBuffer.allocateDirect(BLOCK_SIZE)
+            while (true) {
+                buffer.clear()
+                Archive.readData(archivePtr, buffer)
+                val read = buffer.position()
+                if (read <= 0) break
+                buffer.position(0)
+                buffer.limit(read)
+                val bytes = ByteArray(read)
+                buffer.get(bytes)
+                fos.write(bytes)
+            }
+        }
+    }
+
+    /** 将当前 entry 的数据读入内存。 */
+    private fun readCurrentEntry(archivePtr: Long): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buffer = java.nio.ByteBuffer.allocateDirect(BLOCK_SIZE)
         while (true) {
-            val n = read(buf)
-            if (n <= 0) break
-            out.write(buf, 0, n)
+            buffer.clear()
+            Archive.readData(archivePtr, buffer)
+            val read = buffer.position()
+            if (read <= 0) break
+            buffer.position(0)
+            buffer.limit(read)
+            val bytes = ByteArray(read)
+            buffer.get(bytes)
+            out.write(bytes)
         }
+        return out.toByteArray()
     }
+
+    // endregion
 
     companion object {
-        private val NATURAL_ORDER: Comparator<String> = Comparator { a, b ->
-            val ia = a.naturalKey()
-            val ib = b.naturalKey()
-            compareNatural(ia, ib)
-        }
+        private const val BLOCK_SIZE = 256 * 1024
 
-        private fun String.naturalKey(): List<Any> {
-            val parts = mutableListOf<Any>()
-            var i = 0
-            while (i < length) {
-                val c = this[i]
-                if (c.isDigit()) {
-                    var j = i
-                    while (j < length && this[j].isDigit()) j++
-                    parts += this.substring(i, j).toLongOrNull() ?: 0L
-                    i = j
-                } else {
-                    var j = i
-                    while (j < length && !this[j].isDigit()) j++
-                    parts += this.substring(i, j).lowercase()
-                    i = j
-                }
-            }
-            return parts
-        }
+        private val IMAGE_EXT =
+            setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "heic", "heif")
 
-        private fun compareNatural(a: List<Any>, b: List<Any>): Int {
-            val n = minOf(a.size, b.size)
-            for (i in 0 until n) {
-                val x = a[i]; val y = b[i]
-                val cmp = when {
-                    x is Long && y is Long -> x.compareTo(y)
-                    else -> (x.toString()).compareTo(y.toString())
-                }
-                if (cmp != 0) return cmp
-            }
-            return a.size.compareTo(b.size)
+        fun isImageName(name: String): Boolean {
+            val lower = name.lowercase()
+            return IMAGE_EXT.any { lower.endsWith(".$it") }
         }
     }
-}
-
-enum class ArchiveType { ZIP, RAR;
-    val isZip: Boolean get() = this == ZIP
-    val isRar: Boolean get() = this == RAR
 }

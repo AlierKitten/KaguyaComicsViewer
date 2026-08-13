@@ -14,7 +14,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.io.File
 import java.util.Properties
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -230,18 +229,7 @@ class SmbClient @Inject constructor(
                 val ctx = createContext(source)
                 val smbFile = SmbFile(url, ctx)
                 val input = java.io.BufferedInputStream(smbFile.inputStream, COPY_BUF)
-                val cover = extractor.readCoverFromStream(input, fileName) { stream ->
-                    // RAR 需要随机访问，回退到落盘临时文件后解码
-                    val tempFile = File.createTempFile("cover_extract_", ".tmp")
-                    try {
-                        java.io.FileOutputStream(tempFile).use { out -> stream.copyTo(out) }
-                        extractor.readCover(tempFile, fileName)
-                    } catch (e: Exception) {
-                        null
-                    } finally {
-                        tempFile.delete()
-                    }
-                }
+                val cover = extractor.readCoverFromStream(input, fileName)
                 if (cover != null) Log.d(TAG, "readCover: success for $url")
                 return@withContext cover
             } catch (e: Exception) {

@@ -101,18 +101,7 @@ class LocalFileScanner @Inject constructor(
         val fileName = discovered.relativePath.substringAfterLast('/')
         val input = context.contentResolver.openInputStream(file.uri) ?: return@withContext null
         val buf = java.io.BufferedInputStream(input, 256 * 1024)
-        extractor.readCoverFromStream(buf, fileName) { stream ->
-            // RAR 需要随机访问，回退到落盘临时文件
-            val tempFile = java.io.File.createTempFile("cover_local_", ".tmp")
-            try {
-                java.io.FileOutputStream(tempFile).use { out -> stream.copyTo(out) }
-                extractor.readCover(tempFile, fileName)
-            } catch (e: Exception) {
-                null
-            } finally {
-                tempFile.delete()
-            }
-        }
+        extractor.readCoverFromStream(buf, fileName)
     }
 }
 

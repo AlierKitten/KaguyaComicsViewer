@@ -15,8 +15,7 @@ workManager = "2.10.0"
 coil = "2.7.0"
 mmkv = "2.2.4"
 jcifsng = "2.1.10"
-commonsCompress = "1.26.2"
-junrar = "7.5.5"
+libarchive = "1.1.6"
 coroutines = "1.8.1"
 documentfile = "1.0.1"
 splashscreen = "1.0.1"
@@ -72,9 +71,8 @@ mmkv = { group = "com.tencent", name = "mmkv", version.ref = "mmkv" }
 jcifsng = { group = "eu.agno3.jcifs", name = "jcifs-ng", version.ref = "jcifsng" }
 
 # Archives
-commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
 commons-io = { group = "commons-io", name = "commons-io", version = "2.16.1" }
-junrar = { group = "com.github.junrar", name = "junrar", version.ref = "junrar" }
+libarchive = { group = "me.zhanghai.android.libarchive", name = "library", version.ref = "libarchive" }
 
 # Coroutines
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

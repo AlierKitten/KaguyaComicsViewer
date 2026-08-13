@@ -14,8 +14,8 @@ android {
         applicationId = "com.kaguya.comicsviewer"
         minSdk = 29
         targetSdk = 37
-        versionCode = 202608133
-        versionName = "1.5.1"
+        versionCode = 202608134
+        versionName = "1.5.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -129,9 +129,8 @@ dependencies {
     implementation(libs.jcifsng)
 
     // Archives
-    implementation(libs.commons.compress)
     implementation(libs.commons.io)
-    implementation(libs.junrar)
+    implementation(libs.libarchive)
 
     // Coroutines
     implementation(libs.coroutines.android)
