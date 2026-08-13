@@ -68,7 +68,8 @@ fun ComicCacheEntity.toDomain(): ComicCache = ComicCache(
     extractedDir = extractedDir,
     totalBytes = totalBytes,
     downloadedBytes = downloadedBytes,
-    lastError = lastError
+    lastError = lastError,
+    isExternalArchive = isExternalArchive
 )
 
 fun ComicCache.toEntity(comicId: Long): ComicCacheEntity = ComicCacheEntity(
@@ -78,7 +79,8 @@ fun ComicCache.toEntity(comicId: Long): ComicCacheEntity = ComicCacheEntity(
     extractedDir = extractedDir,
     totalBytes = totalBytes,
     downloadedBytes = downloadedBytes,
-    lastError = lastError
+    lastError = lastError,
+    isExternalArchive = isExternalArchive
 )
 
 fun ReadingProgressEntity.toDomain(): ReadingProgress = ReadingProgress(

@@ -132,19 +132,19 @@ class DownloadComicWorker @AssistedInject constructor(
                 )
                 Log.d(TAG, "doWork: ZIP download complete -> READY (direct-read, no extract)")
             } else {
-                // RAR：需整包解压，置 DOWNLOADED，由调度器链 ExtractComicWorker
+                // 不支持的格式（RAR/CBR 等）：扫描阶段已过滤，正常不应到这；兜底标记失败
+                Log.e(TAG, "doWork: unsupported archive format '${outFile.name}', marking FAILED")
                 repository.upsertCache(
                     ComicCache(
                         comicId = comicId,
-                        state = CacheState.DOWNLOADED,
-                        archiveFile = outFile.absolutePath,
+                        state = CacheState.FAILED,
+                        archiveFile = outFile.absolutePath.takeIf { outFile.isFile },
                         extractedDir = null,
                         totalBytes = outFile.length(),
                         downloadedBytes = outFile.length(),
-                        lastError = null
+                        lastError = "不支持的压缩格式（仅支持 ZIP/CBZ）"
                     )
                 )
-                Log.d(TAG, "doWork: RAR download complete -> DOWNLOADED (needs extract)")
             }
             setProgressAsync(workDataOf(WorkParams.PROGRESS to 100))
             Log.d(TAG, "doWork: success")

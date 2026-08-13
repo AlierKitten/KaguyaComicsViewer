@@ -345,7 +345,7 @@ private fun ContinuousReader(
                 detectTapGestures(onTap = { onTap() })
             }
     ) {
-        items(state.pages, key = { it.archivePath ?: it.path ?: it.index.toString() }) { p ->
+        items(state.pages, key = { it.index }) { p ->
             PageView(p)
         }
     }

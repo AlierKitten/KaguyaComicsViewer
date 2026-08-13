@@ -26,5 +26,6 @@ data class ComicCacheEntity(
     @ColumnInfo(name = "extracted_dir") val extractedDir: String?,
     @ColumnInfo(name = "total_bytes") val totalBytes: Long,
     @ColumnInfo(name = "downloaded_bytes") val downloadedBytes: Long,
-    @ColumnInfo(name = "last_error") val lastError: String?
+    @ColumnInfo(name = "last_error") val lastError: String?,
+    @ColumnInfo(name = "is_external_archive") val isExternalArchive: Boolean = false
 )

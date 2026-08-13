@@ -154,7 +154,8 @@ class SmbClient @Inject constructor(
                 DiscoveredComic(
                     title = fileName.substringBeforeLast('.'),
                     relativePath = relPath,
-                    absoluteUri = relPath
+                    absoluteUri = relPath,
+                    isZip = extractor.detectType(fileName)?.isZip == true
                 )
             }
         }
@@ -217,19 +218,23 @@ class SmbClient @Inject constructor(
         runCatching { SmbFile(url, ctx).length() }.getOrDefault(-1L)
     }
 
-    /** 从远程压缩包读取封面图片字节（流式，边下载边解，ZIP/CBZ 无需落盘整包）。 */
+    /** 从远程压缩包读取封面图片字节。下载到临时文件后用 libarchive 随机访问解压首图，
+     * 不保留整包（与阅读阶段下载副本逻辑分离，避免并发冲突）。 */
     suspend fun readCover(source: ComicSource, remotePath: String): ByteArray? = withContext(Dispatchers.IO) {
         val share = source.share?.ifBlank { null } ?: error("share missing")
         val hostStr = source.host ?: error("host missing")
         val url = buildSmbUrl(hostStr, share, null) + remotePath.trimStart('/')
         val fileName = remotePath.substringAfterLast('/')
+        val tmp = java.io.File.createTempFile("smb_cover_", "_$fileName")
         // SMB 共享对单账户有连接数上限，批量扫描时密集开关连接可能触发瞬时上限，这里轻量重试
         repeat(3) { attempt ->
             try {
                 val ctx = createContext(source)
                 val smbFile = SmbFile(url, ctx)
-                val input = java.io.BufferedInputStream(smbFile.inputStream, COPY_BUF)
-                val cover = extractor.readCoverFromStream(input, fileName)
+                java.io.BufferedInputStream(smbFile.inputStream, COPY_BUF).use { input ->
+                    java.io.FileOutputStream(tmp).use { out -> input.copyTo(out, COPY_BUF) }
+                }
+                val cover = extractor.readCover(tmp)
                 if (cover != null) Log.d(TAG, "readCover: success for $url")
                 return@withContext cover
             } catch (e: Exception) {
@@ -239,6 +244,8 @@ class SmbClient @Inject constructor(
                 } else {
                     Log.w(TAG, "readCover: failed for $url: ${e.message}")
                 }
+            } finally {
+                if (attempt == 2) runCatching { tmp.delete() }
             }
         }
         null

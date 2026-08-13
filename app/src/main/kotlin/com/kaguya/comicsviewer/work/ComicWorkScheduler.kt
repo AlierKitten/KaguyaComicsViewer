@@ -56,21 +56,8 @@ class ComicWorkScheduler @Inject constructor(
             return
         }
 
-        val extract = OneTimeWorkRequestBuilder<ExtractComicWorker>()
-            .setInputData(
-                workDataOf(
-                    WorkParams.COMIC_ID to comic.id,
-                    "title" to comic.title
-                )
-            )
-            .addTag(tagFor(comic.id))
-            .build()
-
-        WorkManager.getInstance(context)
-            .beginUniqueWork(workName(comic.id), ExistingWorkPolicy.REPLACE, download)
-            .then(extract)
-            .enqueue()
-        Log.d(TAG, "WorkManager chain enqueued: download->extract for comicId=${comic.id}")
+        // 不支持的格式（RAR/CBR 等）：扫描阶段已过滤，正常不会到这；记录错误日志。
+        Log.e(TAG, "scheduleDownloadAndExtract: unsupported archive format '${comic.filePath}', skip (RAR/CBR not supported)")
     }
 
     fun cancel(comicId: Long) {

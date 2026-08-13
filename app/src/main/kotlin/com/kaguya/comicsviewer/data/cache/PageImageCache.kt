@@ -15,6 +15,10 @@ import kotlin.math.max
  * ZIP/CBZ 源不整包解压，阅读时按需把当前页及附近页解压到该缓存目录，
  * Coil 直接读取缓存文件；最多保留 [maxPagesPerComic] 个缓存页，超出按
  * 最久未访问淘汰。同一页并发请求只解压一次（[Mutex] 去重）。
+ *
+ * [ComicPage.archivePath] 一定是可读的本地压缩包文件路径（本地源经真实路径直读或
+ * 懒缓存副本、SMB 源为下载副本），因此本地源与 SMB 源完全共用同一解压逻辑，
+ * 无需区分数据来源。
  */
 @Singleton
 class PageImageCache @Inject constructor(
@@ -65,7 +69,12 @@ class PageImageCache @Inject constructor(
                 return@withLock target
             }
             val ok = extractor.extractImageTo(File(archivePath), entryName, target)
-            if (ok) target else null
+            if (ok) {
+                evictIfNeeded(comicId)
+                target
+            } else {
+                null
+            }
         }
     }
 

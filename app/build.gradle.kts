@@ -14,8 +14,8 @@ android {
         applicationId = "com.kaguya.comicsviewer"
         minSdk = 29
         targetSdk = 37
-        versionCode = 202608134
-        versionName = "1.5.2"
+        versionCode = 202608141
+        versionName = "1.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

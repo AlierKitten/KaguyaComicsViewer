@@ -5,7 +5,9 @@ import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.DiscoveredComic
 import com.kaguya.comicsviewer.data.source.LocalFileScanner
 import com.kaguya.comicsviewer.data.source.SmbFileScanner
+import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
+import com.kaguya.comicsviewer.domain.model.ComicCache
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
 import com.kaguya.comicsviewer.util.CacheDirectories
@@ -46,11 +48,13 @@ class ScanSourceUseCase @Inject constructor(
      *
      * @param onPhase1 第一阶段完成时回调（参数为发现的漫画数）
      * @param onPhase2 第二阶段进度回调（参数为进度文本）
+     * @param onRarSkipped 本地源发现不支持的 RAR/CBR 数量时回调（用于提示用户）
      */
     suspend operator fun invoke(
         source: ComicSource,
         onPhase1: (Int) -> Unit = {},
         onPhase2: (String) -> Unit = {},
+        onRarSkipped: (Int) -> Unit = {},
         indexCover: Boolean = true
     ): Int {
         Log.d(TAG, "scan start: source='${source.name}', type=${source.type}")
@@ -75,8 +79,17 @@ class ScanSourceUseCase @Inject constructor(
         val existing = repository.listComicsBySources(listOf(source.id))
         val existingByPath = existing.associateBy { it.filePath }
         val keepIds = mutableListOf<Long>()
+        // 本地源仅支持 ZIP/CBZ；RAR/CBR 不支持，跳过不入库并统计数量用于提示。
+        var rarSkipped = 0
 
         for (d in found) {
+            // 本软件不支持 RAR/CBR（无法随机访问、按需解压单页），扫描阶段直接跳过并提示用户。
+            if (!d.isZip) {
+                rarSkipped++
+                Log.d(TAG, "comic '${d.title}': RAR/CBR not supported, skipped (filePath=${d.relativePath})")
+                continue
+            }
+
             val prev = existingByPath[d.relativePath]
             val comic = Comic(
                 id = prev?.id ?: 0L,
@@ -91,14 +104,37 @@ class ScanSourceUseCase @Inject constructor(
             )
             val id = repository.upsertComic(comic)
             keepIds += id
+
+            // 本地源：直接以原始压缩包作为数据源，不复制一份到缓存目录。
+            // ZIP/CBZ 支持随机访问，可「按需单页解压、整包零落盘」，扫描后直接 READY（阅读时按页从 SAF 流解压）。
+            // archiveFile 记为 "saf:<id>" 标识，isExternalArchive=true 表示原始文件在外部存储，清理缓存时不得删除。
+            if (source.type == ComicSourceType.LOCAL) {
+                Log.d(TAG, "local comic '${d.title}': isZip=${d.isZip}, filePath=${d.relativePath}")
+                repository.upsertCache(
+                    ComicCache(
+                        comicId = id,
+                        state = CacheState.READY,
+                        archiveFile = "saf:$id",
+                        extractedDir = null,
+                        totalBytes = prev?.sizeBytes ?: 0L,
+                        downloadedBytes = prev?.sizeBytes ?: 0L,
+                        lastError = null,
+                        isExternalArchive = true
+                    )
+                )
+            }
         }
 
         repository.removeComicsNotIn(source.id, keepIds)
         repository.markSourceScanned(source.id, now)
-        Log.d(TAG, "phase1 complete: upserted=${found.size}")
+        Log.d(TAG, "phase1 complete: upserted=${keepIds.size}, rarSkipped=$rarSkipped")
 
         // 通知 UI 第一阶段完成
-        onPhase1(found.size)
+        onPhase1(keepIds.size)
+        // 有被跳过的 RAR/CBR 时提示用户
+        if (rarSkipped > 0) {
+            onRarSkipped(rarSkipped)
+        }
 
         // ── Phase 2: 后台获取文件大小 + 生成封面 ──
         if (cancelled.get()) return found.size

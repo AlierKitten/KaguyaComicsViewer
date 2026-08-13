@@ -30,7 +30,12 @@ data class ComicCache(
     val extractedDir: String?,
     val totalBytes: Long,
     val downloadedBytes: Long,
-    val lastError: String?
+    val lastError: String?,
+    /**
+     * true 表示 archiveFile 是用户原始文件（如外部存储上的压缩包，本地源直接读取场景）。
+     * 此时删除缓存不应删除该文件，只清理解压目录。
+     */
+    val isExternalArchive: Boolean = false
 )
 
 enum class CacheState {

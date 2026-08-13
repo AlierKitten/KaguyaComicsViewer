@@ -9,6 +9,7 @@ import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
 import com.kaguya.comicsviewer.domain.model.ComicSortField
+import com.kaguya.comicsviewer.domain.model.ComicSourceType
 import com.kaguya.comicsviewer.domain.usecase.CancelDownloadUseCase
 import com.kaguya.comicsviewer.domain.usecase.DownloadComicUseCase
 import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
@@ -260,6 +261,7 @@ class LibraryViewModel @Inject constructor(
                             s,
                             onPhase1 = { n -> totalFound += n },
                             onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") },
+                            onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
                             indexCover = settings.settings.value.indexCoverOnScan
                         )
                     } catch (e: Exception) {
@@ -305,43 +307,61 @@ class LibraryViewModel @Inject constructor(
     /** 开始加载漫画，并追踪进度 */
     fun startLoading(comicId: Long, title: String) {
         Log.d("LibraryViewModel", "startLoading: comicId=$comicId, title='$title'")
-        _loadingProgress.value = LoadingProgress(
-            comicId = comicId,
-            title = title,
-            state = CacheState.PENDING
-        )
 
-        // 观察缓存状态变化来更新进度
         viewModelScope.launch {
-            repository.observeCache(comicId).collectLatest { cache ->
-                val c = cache ?: return@collectLatest
-                // 已取消或切换到其他漫画，不再更新
-                if (_loadingProgress.value?.comicId != comicId) return@collectLatest
-                Log.d("LibraryViewModel", "cache update: comicId=$comicId, state=${c.state}")
+            // 本地源 ZIP/CBZ：扫描阶段已标记 READY，采用「按需单页解压、整包零落盘」，
+            // 无需任何 Worker。直接置 READY 让 UI 立即跳转阅读器（不弹加载框）。
+            // 判断依据为「源类型 + 扩展名」，不依赖缓存行是否存在，避免缓存行缺失时卡死。
+            val comic = repository.findComic(comicId)
+            val source = comic?.let { c ->
+                repository.listEnabledSources().firstOrNull { it.id == c.sourceId }
+            }
+            val isLocalZip = source?.type == ComicSourceType.LOCAL &&
+                comic?.filePath?.let { p ->
+                    p.endsWith(".zip", true) || p.endsWith(".cbz", true)
+                } == true
+            if (isLocalZip) {
+                Log.d("LibraryViewModel", "local ZIP direct-read, skip loading dialog: comicId=$comicId")
                 _loadingProgress.value = LoadingProgress(
                     comicId = comicId,
                     title = title,
-                    state = c.state,
-                    progressPercent = if (c.totalBytes > 0) ((c.downloadedBytes * 100) / c.totalBytes).toInt() else 0,
-                    downloadedBytes = c.downloadedBytes,
-                    totalBytes = c.totalBytes,
-                    error = c.lastError
+                    state = CacheState.READY
                 )
+                return@launch
             }
-        }
 
-        // 触发下载
-        viewModelScope.launch {
+            // 非本地源（如 SMB）或 RAR（理论上扫描阶段已过滤）：置 PENDING 并启动观察与下载链
+            _loadingProgress.value = LoadingProgress(
+                comicId = comicId,
+                title = title,
+                state = CacheState.PENDING
+            )
+
+            // 观察缓存状态变化来更新进度
+            launch {
+                repository.observeCache(comicId).collectLatest { c ->
+                    // 已取消或切换到其他漫画，不再更新
+                    if (_loadingProgress.value?.comicId != comicId) return@collectLatest
+                    Log.d("LibraryViewModel", "cache update: comicId=$comicId, state=${c?.state}")
+                    _loadingProgress.value = LoadingProgress(
+                        comicId = comicId,
+                        title = title,
+                        state = c?.state ?: CacheState.PENDING,
+                        progressPercent = if ((c?.totalBytes ?: 0) > 0)
+                            ((c!!.downloadedBytes * 100) / c.totalBytes).toInt() else 0,
+                        downloadedBytes = c?.downloadedBytes ?: 0,
+                        totalBytes = c?.totalBytes ?: 0,
+                        error = c?.lastError
+                    )
+                }
+            }
+
+            // 触发下载
             try {
                 downloadUseCase(comicId)
                 Log.d("LibraryViewModel", "download scheduled: comicId=$comicId")
             } catch (e: Exception) {
                 Log.e("LibraryViewModel", "download failed: comicId=$comicId", e)
-                _loadingProgress.value = _loadingProgress.value?.copy(
-                    state = CacheState.FAILED,
-                    error = e.message
-                )
-                _toastEvents.tryEmit("加载失败：${e.message}")
             }
         }
     }

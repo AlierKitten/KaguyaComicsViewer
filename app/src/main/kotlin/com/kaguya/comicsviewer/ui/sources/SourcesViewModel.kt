@@ -149,6 +149,7 @@ class SourcesViewModel @Inject constructor(
                         else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
                     },
                     onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
+                    onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
                     indexCover = settings.settings.value.indexCoverOnScan
                 )
                 if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
@@ -179,6 +180,7 @@ class SourcesViewModel @Inject constructor(
                             s,
                             onPhase1 = { n -> totalFound += n },
                             onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") },
+                            onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
                             indexCover = settings.settings.value.indexCoverOnScan
                         )
                     } catch (e: Exception) {
@@ -210,15 +212,16 @@ class SourcesViewModel @Inject constructor(
         scanUseCase.resetCancellation()
         _scanningIds.value = _scanningIds.value + sourceId
         try {
-            val count = scanUseCase(
-                source,
-                onPhase1 = { n ->
-                    if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
-                    else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
-                },
-                onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
-                indexCover = settings.settings.value.indexCoverOnScan
-            )
+                val count = scanUseCase(
+                    source,
+                    onPhase1 = { n ->
+                        if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
+                        else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
+                    },
+                    onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
+                    onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
+                    indexCover = settings.settings.value.indexCoverOnScan
+                )
             if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
         } catch (e: Exception) {
             Log.e("SourcesViewModel", "scan failed for ${source.name}", e)

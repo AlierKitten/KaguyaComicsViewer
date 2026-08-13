@@ -3,9 +3,11 @@ package com.kaguya.comicsviewer.data.source
 import android.content.Context
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
 import com.kaguya.comicsviewer.domain.model.ComicSource
+import com.kaguya.comicsviewer.util.FileDescriptorCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +22,14 @@ data class DiscoveredComic(
     val title: String,
     val relativePath: String,
     val absoluteUri: String,
-    val sizeBytes: Long = 0
+    val sizeBytes: Long = 0,
+    /**
+     * 本地源：若压缩包位于外部存储，提取出的真实文件系统路径（如 /storage/emulated/0/...）。
+     * 非空时可直接读取原始压缩包，无需复制一份到缓存目录。
+     */
+    val localFilePath: String? = null,
+    /** 压缩包类型是否为 ZIP/CBZ（true=可直接按需解压，false=RAR 需整包解压）。 */
+    val isZip: Boolean = false
 )
 
 /** 扫描器抽象。 */
@@ -60,12 +69,19 @@ class LocalFileScanner @Inject constructor(
             if (file.isDirectory) {
                 walk(file, if (prefix.isEmpty()) name else "$prefix/$name", out, shouldCancel)
             } else {
-                if (extractor.detectType(name) == null) continue
+                val lower = name.lowercase()
+                // 仅收集压缩包（ZIP/CBZ/RAR/CBR）；RAR/CBR 不在本软件支持范围内，
+                // 仍收集以便 ScanSourceUseCase 统计并提示用户跳过了多少个。
+                if (!lower.endsWith(".zip") && !lower.endsWith(".cbz") &&
+                    !lower.endsWith(".rar") && !lower.endsWith(".cbr")
+                ) continue
                 val relative = if (prefix.isEmpty()) name else "$prefix/$name"
                 out += DiscoveredComic(
                     title = name.substringBeforeLast('.'),
                     relativePath = relative,
-                    absoluteUri = file.uri.toString()
+                    absoluteUri = file.uri.toString(),
+                    localFilePath = FileDescriptorCompat.path(file),
+                    isZip = extractor.detectType(name)?.isZip == true
                 )
             }
         }
@@ -90,6 +106,15 @@ class LocalFileScanner @Inject constructor(
     }
 
     override suspend fun cover(source: ComicSource, discovered: DiscoveredComic): ByteArray? = withContext(Dispatchers.IO) {
+        // 优先：能取到真实本地文件路径时直接读文件，更快更可靠
+        val localPath = discovered.localFilePath
+        if (localPath != null) {
+            val f = java.io.File(localPath)
+            if (f.isFile) {
+                extractor.readCover(f)?.let { return@withContext it }
+            }
+        }
+        // 回退：通过 SAF 流读取，先复制到临时文件再用 libarchive 随机访问
         val treeUri = source.localUri ?: return@withContext null
         val root = DocumentFile.fromTreeUri(context, android.net.Uri.parse(treeUri)) ?: return@withContext null
         val parts = discovered.relativePath.split('/').filter { it.isNotBlank() }
@@ -99,24 +124,61 @@ class LocalFileScanner @Inject constructor(
         }
         val file = cur ?: return@withContext null
         val fileName = discovered.relativePath.substringAfterLast('/')
-        val input = context.contentResolver.openInputStream(file.uri) ?: return@withContext null
-        val buf = java.io.BufferedInputStream(input, 256 * 1024)
-        extractor.readCoverFromStream(buf, fileName)
+        val tmp = java.io.File.createTempFile("local_cover_", "_$fileName")
+        return@withContext try {
+            context.contentResolver.openInputStream(file.uri)?.use { input ->
+                java.io.FileOutputStream(tmp).use { out -> input.copyTo(out, 256 * 1024) }
+            }
+            extractor.readCover(tmp)
+        } catch (e: Exception) {
+            Log.w("ComicScanner", "本地源封面回退失败: ${e.message}")
+            null
+        } finally {
+            runCatching { tmp.delete() }
+        }
     }
 }
 
 private object FileDescriptorCompat {
+    /**
+     * 提取外部存储上文档的真实文件系统路径，如 /storage/emulated/0/...。
+     * 仅对 com.android.externalstorage.documents 且 docId 以 "primary:" 开头的文档有效，
+     * 其它情况返回 null（需走 SAF 流）。
+     */
+    fun path(file: DocumentFile): String? {
+        val uri = file.uri
+        if (uri.authority != "com.android.externalstorage.documents") {
+            Log.d("FileDescriptorCompat", "path: unsupported authority=${uri.authority}")
+            return null
+        }
+        val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
+        if (docId == null) {
+            Log.d("FileDescriptorCompat", "path: getDocumentId failed, uri=$uri")
+            return null
+        }
+        // docId 形如 "primary:<relative>" 或 "<uuid>:<relative>"
+        val (volume, relative) = docId.split(":", limit = 2).let { it[0] to (it.getOrNull(1) ?: "") }
+        val base = when {
+            volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
+            else -> "/storage/$volume"
+        }
+        val full = "$base/$relative".replace("//", "/")
+        Log.d("FileDescriptorCompat", "path: docId='$docId' -> '$full'")
+        // 验证文件确实可读，否则回退到 SAF 流（复制）路径
+        return if (java.io.File(full).canRead()) {
+            Log.d("FileDescriptorCompat", "path: verified readable: '$full'")
+            full
+        } else {
+            Log.w("FileDescriptorCompat", "path: file not readable, fallback to copy: '$full'")
+            null
+        }
+    }
+
     fun length(context: Context, file: DocumentFile): Long {
         // 1. 最可靠：对外部存储 provider，直接提取文件路径用 java.io.File 获取大小
         val filePathLen = runCatching {
-            val uri = file.uri
-            if (uri.authority == "com.android.externalstorage.documents") {
-                val docId = DocumentsContract.getDocumentId(uri)
-                if (docId.startsWith("primary:")) {
-                    val path = docId.removePrefix("primary:")
-                    java.io.File("/storage/emulated/0/$path").length()
-                } else 0L
-            } else 0L
+            val p = path(file)
+            if (p != null) java.io.File(p).length() else 0L
         }.getOrDefault(0L)
         if (filePathLen > 0) return filePathLen
         // 2. 尝试 DocumentFile.length()
@@ -150,3 +212,4 @@ private object FileDescriptorCompat {
         }.getOrDefault(0L)
     }
 }
+

@@ -6,6 +6,7 @@ import com.kaguya.comicsviewer.domain.model.ComicPage
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ReadingProgress
 import kotlinx.coroutines.flow.Flow
+import java.io.File
 
 interface ComicRepository {
     fun observeSources(): Flow<List<ComicSource>>
@@ -39,6 +40,16 @@ interface ComicRepository {
     suspend fun saveProgress(progress: ReadingProgress)
 
     suspend fun listPages(comicId: Long): List<ComicPage>
+
+    /**
+     * 统一解析出可读的本地压缩包文件（本地源与 SMB 源共用，实现效果一致）：
+     * - 本地源：优先用 SAF DocumentFile 的真实文件路径直读原始压缩包；
+     *   不可读（如 scoped storage 无权限）则懒复制压缩包副本到缓存目录再读。
+     * - SMB 源：压缩包已由下载 Worker 落到本地缓存，直接返回该副本文件。
+     * 返回的 File 一定可被随机访问（seek），供 ArchiveExtractor 直接解压单页。
+     * 若不存在或解析失败返回 null。
+     */
+    suspend fun resolveArchiveFile(comicId: Long): File?
 
     suspend fun updatePageCount(comicId: Long, count: Int)
 
