@@ -1,5 +1,7 @@
 package com.kaguya.comicsviewer.data.source.archive
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -7,6 +9,7 @@ import kotlinx.coroutines.withContext
 import me.zhanghai.android.libarchive.Archive
 import me.zhanghai.android.libarchive.ArchiveEntry
 import me.zhanghai.android.libarchive.ArchiveException
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -151,18 +154,90 @@ class ArchiveExtractor @Inject constructor() {
         }
     }
 
-    /** 读取压缩包封面（按图片名排序后的第一张）。 */
+    /** 读取压缩包封面（按图片名排序后的第一张）。封面会降采样 + JPEG 压缩后再返回，缩小索引体积。 */
     suspend fun readCover(archive: File): ByteArray? = withContext(Dispatchers.IO) {
         if (!archive.isFile) return@withContext null
         val entries = listImageEntries(archive)
         val coverName = entries.firstOrNull() ?: return@withContext null
-        readEntry(archive, coverName)
+        readEntry(archive, coverName)?.let { downscaleCover(it) }
     }
 
     /** 读取本地 archive 文件的封面（带已知文件名）。 */
     suspend fun readCover(archive: File, fileName: String): ByteArray? {
         if (detectType(fileName) == null) return null
         return readCover(archive)
+    }
+
+    /**
+     * 从输入流读取封面（按图片名排序后的第一张），**单次顺序扫描**命中第一张图即停止并读出。
+     * 不要求随机访问，适合 SMB / SAF 等无法 seek 的流；且不会二次消费同一个已耗尽的流
+     * （listImageEntries 与 readEntry 若分两次调用会各自从头扫，对不可重置的远程流会失效）。
+     * 封面同样降采样 + JPEG 压缩。
+     */
+    suspend fun readCoverStream(input: InputStream, fileName: String): ByteArray? {
+        if (detectType(fileName) == null) return null
+        val coverBytes = readFirstImageEntry(input) ?: return null
+        return downscaleCover(coverBytes)
+    }
+
+    /** 单次顺序扫描流，返回第一个图片 entry 的原始字节；命中即停止（不再继续扫后续条目）。 */
+    private suspend fun readFirstImageEntry(input: InputStream): ByteArray? = withContext(Dispatchers.IO) {
+        // 优先 libarchive 回调式流读取
+        val libarchiveResult = try {
+            var result: ByteArray? = null
+            openFromStream(input) { ptr ->
+                walkEntries(ptr) { entry ->
+                    val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                    if (isImageName(path)) {
+                        result = readCurrentEntry(ptr)
+                        true // 命中第一张图即停止扫描
+                    } else {
+                        false
+                    }
+                }
+            }
+            result
+        } catch (e: Exception) {
+            Log.w("ArchiveExtractor", "libarchive 流读封面失败，回退 JDK: ${e.message}")
+            null
+        }
+        if (libarchiveResult != null) return@withContext libarchiveResult
+        // 回退 JDK ZipInputStream：同样只需一次扫描，命中首图即停
+        runCatching { readFirstImageEntryJdkStream(input) }.getOrNull()
+    }
+
+    private fun readFirstImageEntryJdkStream(input: InputStream): ByteArray? {
+        ZipInputStream(input).use { zis ->
+            var ze = zis.nextEntry
+            while (ze != null) {
+                if (!ze.isDirectory && isImageName(ze.name)) {
+                    return zis.readBytes()
+                }
+                ze = zis.nextEntry
+            }
+        }
+        return null
+    }
+
+    /**
+     * 封面降采样：先按 [inJustDecodeBounds] 探测原始尺寸，再以 [COVER_TARGET_SIZE] 为最长边
+     * 计算 [BitmapFactory.Options.inSampleSize] 降采样，最后以 JPEG quality 80 压缩输出。
+     * 直接返回原始 entry 字节会导致索引/列表加载大量原始大图（如 20MB 单图），故必须压缩。
+     */
+    private fun downscaleCover(bytes: ByteArray): ByteArray? {
+        return runCatching {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            val maxDim = maxOf(opts.outWidth, opts.outHeight).takeIf { it > 0 } ?: return@runCatching null
+            val sample = if (maxDim > COVER_TARGET_SIZE) maxDim / COVER_TARGET_SIZE else 1
+            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts) ?: return@runCatching null
+            ByteArrayOutputStream().use { out ->
+                bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                bmp.recycle()
+                out.toByteArray()
+            }
+        }.getOrNull()
     }
 
     // endregion
@@ -338,11 +413,17 @@ class ArchiveExtractor @Inject constructor() {
     // region libarchive 遍历封装
 
     private inline fun walkEntries(archivePtr: Long, onEntry: (Long) -> Boolean) {
+        // readNextHeader 返回 entry 指针（非 0 表示有效条目，0 表示 EOF）。
+        // 关键：用 runCatching 包裹，因为遇到损坏条目时会抛 ArchiveException 而非返回 0。
+        // 若直接写 `runCatching{...}.getOrNull() != 0L`，异常时 getOrNull() 为 null，
+        // 而 `null != 0L` 在 Kotlin 中恒为 true，会带着 entry=0L 进入循环体并调用
+        // ArchiveEntry.filetype(0) —— 触发原生 SIGSEGV（fault addr 0x430）。
+        // 因此必须显式判断结果非 null 且非 0 才进入。
         var entry: Long
-        while (runCatching { Archive.readNextHeader(archivePtr) }
-                .getOrNull()
-                .also { entry = it ?: 0L } != 0L
-        ) {
+        while (true) {
+            val result = runCatching { Archive.readNextHeader(archivePtr) }.getOrNull()
+            if (result == null || result == 0L) break
+            entry = result
             if (ArchiveEntry.filetype(entry) and ArchiveEntry.AE_IFMT != ArchiveEntry.AE_IFREG) continue
             if (onEntry(entry)) break
         }
@@ -452,6 +533,9 @@ class ArchiveExtractor @Inject constructor() {
 
     companion object {
         private const val BLOCK_SIZE = 256 * 1024
+
+        /** 封面最长边目标像素。 */
+        private const val COVER_TARGET_SIZE = 480
 
         private val IMAGE_EXT =
             setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "heic", "heif")

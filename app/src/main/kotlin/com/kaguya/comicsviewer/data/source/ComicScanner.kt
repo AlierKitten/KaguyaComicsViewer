@@ -124,17 +124,14 @@ class LocalFileScanner @Inject constructor(
         }
         val file = cur ?: return@withContext null
         val fileName = discovered.relativePath.substringAfterLast('/')
-        val tmp = java.io.File.createTempFile("local_cover_", "_$fileName")
+        // 流式读取原始压缩包，顺序扫描到第一张图即停止（命中即中断），不复制整个压缩包到缓存。
         return@withContext try {
             context.contentResolver.openInputStream(file.uri)?.use { input ->
-                java.io.FileOutputStream(tmp).use { out -> input.copyTo(out, 256 * 1024) }
+                extractor.readCoverStream(input, fileName)
             }
-            extractor.readCover(tmp)
         } catch (e: Exception) {
             Log.w("ComicScanner", "本地源封面回退失败: ${e.message}")
             null
-        } finally {
-            runCatching { tmp.delete() }
         }
     }
 }
