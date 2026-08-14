@@ -19,6 +19,7 @@ import com.kaguya.comicsviewer.util.CacheDirectories
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,7 +76,9 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch(errorHandler) {
             _state.value = _state.value.copy(isLoading = true, error = null)
             val comic = repository.findComic(comicId)
-            val list = repository.listPages(comicId)
+            // listPages 对本地源会顺序扫描整个 SAF 流，耗时较长；用 NonCancellable 保护，
+            // 避免阅读器协程因配置变更/重组被取消而中断扫描（否则会得到空页列表 → "未找到页面"）。
+            val list = withContext(NonCancellable) { repository.listPages(comicId) }
             val s: AppSettings = runCatching { settings.settings.first() }
                 .getOrDefault(AppSettings(ReadingMode.PAGED, keepScreenOn = true, autoMarkRead = false))
             val initialPage = runCatching { repository.observeProgress(comicId).first()?.page ?: 0 }
@@ -111,10 +114,26 @@ class ReaderViewModel @Inject constructor(
                 if (firstPage.path != null) {
                     File(firstPage.path).takeIf { it.exists() }?.readBytes()
                 } else if (firstPage.isArchive) {
-                    extractor.readEntry(
-                        archive = File(firstPage.archivePath!!),
-                        entryName = firstPage.entryName!!
-                    )
+                    val ap = firstPage.archivePath!!
+                    if (ap.startsWith("saf:")) {
+                        // 本地源 SAF 流直读封面（第一页），不依赖压缩包真实路径。
+                        val streamComicId = runCatching { ap.removePrefix("saf:").toLong() }.getOrNull()
+                            ?: comic.id
+                        val pair = repository.openArchiveStream(streamComicId)
+                        if (pair != null) {
+                            val (input, _) = pair
+                            val b = runCatching {
+                                extractor.readEntryStream(input, firstPage.entryName!!)
+                            }.getOrNull()
+                            runCatching { input.close() }
+                            b
+                        } else null
+                    } else {
+                        extractor.readEntry(
+                            archive = File(ap),
+                            entryName = firstPage.entryName!!
+                        )
+                    }
                 } else null
             }.getOrNull()
         } ?: return comic

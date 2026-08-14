@@ -2,6 +2,7 @@ package com.kaguya.comicsviewer.data.repository
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.kaguya.comicsviewer.data.local.dao.ComicDao
 import com.kaguya.comicsviewer.data.local.dao.ComicSourceDao
@@ -18,9 +19,11 @@ import com.kaguya.comicsviewer.domain.model.ReadingProgress
 import com.kaguya.comicsviewer.util.CacheDirectories
 import com.kaguya.comicsviewer.util.FileDescriptorCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,6 +35,10 @@ class ComicRepositoryImpl @Inject constructor(
     private val cacheDirs: CacheDirectories,
     private val extractor: ArchiveExtractor
 ) : ComicRepository {
+
+    private companion object {
+        const val TAG = "ComicRepositoryImpl"
+    }
 
     override fun observeSources(): Flow<List<ComicSource>> =
         sourceDao.observeAll().map { list -> list.map { it.toDomain() } }
@@ -126,22 +133,34 @@ class ComicRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deleteCache(comicId: Long) {
-        // Remove on-disk files first.
-        comicDao.findCache(comicId)?.let { entity ->
-            // 仅删除缓存副本；外部存储上的原始压缩包（本地源直接读取）不得删除。
-            if (!entity.isExternalArchive) {
-                entity.archiveFile?.let { p -> runCatching { java.io.File(p).delete() } }
-            } else {
-                // 本地源：我们在 archives/ 下懒缓存了压缩包副本（comic_<id>.*），此处应一并清理，
-                // 但绝不删除用户原始文件（archiveFile 为 "saf:<id>" 标识，非真实路径）。
-                cacheDirs.archiveFile(comicId)?.let { f ->
-                    runCatching { if (f.exists() && f.name.startsWith("comic_$comicId")) f.delete() }
-                }
+        val entity = comicDao.findCache(comicId)
+        if (entity == null) {
+            cacheDirs.clearPageCache(comicId)
+            return
+        }
+        // 仅删除磁盘缓存产物；外部存储上的原始压缩包（本地源直接读取）不得删除。
+        if (!entity.isExternalArchive) {
+            entity.archiveFile?.let { p -> runCatching { java.io.File(p).delete() } }
+            entity.extractedDir?.let { p -> runCatching { java.io.File(p).deleteRecursively() } }
+            cacheDirs.clearPageCache(comicId)
+            comicDao.deleteCache(comicId)
+        } else {
+            // 本地源（SAF 流直读）：原始压缩包始终在用户存储中可读，"缓存"只是解压出来的页。
+            // 清缓存时只删磁盘文件，必须保留 cache 行（READY + "saf:<id>" 标识），
+            // 否则重新阅读时 listPages 因找不到 READY 缓存而返回空页（"未找到页面"）。
+            cacheDirs.archiveFile(comicId)?.let { f ->
+                runCatching { if (f.exists() && f.name.startsWith("comic_$comicId")) f.delete() }
             }
             entity.extractedDir?.let { p -> runCatching { java.io.File(p).deleteRecursively() } }
+            cacheDirs.clearPageCache(comicId)
+            val reset = entity.copy(
+                state = CacheState.READY.name,
+                extractedDir = null,
+                downloadedBytes = 0,
+                lastError = null
+            )
+            comicDao.upsertCache(reset)
         }
-        cacheDirs.clearPageCache(comicId)
-        comicDao.deleteCache(comicId)
     }
 
     override fun observeProgress(comicId: Long): Flow<ReadingProgress?> =
@@ -210,11 +229,100 @@ class ComicRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun listPages(comicId: Long): List<ComicPage> {
-        val cache = comicDao.findCache(comicId)?.toDomain() ?: return emptyList()
-        if (cache.state != CacheState.READY) return emptyList()
+    override suspend fun openArchiveStream(comicId: Long): Pair<InputStream, String>? {
+        val comic = findComic(comicId) ?: run {
+            Log.e(TAG, "openArchiveStream: comic not found: $comicId")
+            return null
+        }
+        val source = sourceDao.findById(comic.sourceId)?.toDomain() ?: run {
+            Log.e(TAG, "openArchiveStream: source not found for comicId=$comicId")
+            return null
+        }
+        // 仅本地源支持 SAF 流直读（不复制压缩包）；SMB 源走已下载副本。
+        if (source.type != ComicSourceType.LOCAL) {
+            Log.w(TAG, "openArchiveStream: 非本地源，跳过: comicId=$comicId")
+            return null
+        }
+        val localUri = source.localUri ?: run {
+            Log.e(TAG, "openArchiveStream: localUri 为空 for comicId=$comicId")
+            return null
+        }
+        val root = DocumentFile.fromTreeUri(context, Uri.parse(localUri)) ?: run {
+            Log.e(TAG, "openArchiveStream: DocumentFile.fromTreeUri 失败 localUri=$localUri")
+            return null
+        }
+        val parts = comic.filePath.split('/').filter { it.isNotBlank() }
+        var cur: DocumentFile? = root
+        for (p in parts) {
+            cur = cur?.listFiles()?.firstOrNull { it.name == p } ?: run {
+                Log.e(TAG, "openArchiveStream: 遍历路径失败 at '$p' (comicId=$comicId, filePath=${comic.filePath})")
+                return null
+            }
+        }
+        val file = cur ?: run {
+            Log.e(TAG, "openArchiveStream: file 为 null comicId=$comicId")
+            return null
+        }
+        val input = runCatching { context.contentResolver.openInputStream(file.uri) }
+            .onFailure { Log.e(TAG, "openArchiveStream: openInputStream 失败 comicId=$comicId, ${it.message}", it) }
+            .getOrNull()
+            ?: run {
+                Log.e(TAG, "openArchiveStream: openInputStream 返回 null comicId=$comicId")
+                return null
+            }
+        val fileName = comic.filePath.substringAfterLast('/')
+        Log.d(TAG, "openArchiveStream: comicId=$comicId, fileName=$fileName (SAF 流直读)")
+        return input to fileName
+    }
 
-        // 本地源与 SMB 源共用同一路径：解析出可读的本地压缩包文件后按需列举图片条目。
+    override suspend fun listPages(comicId: Long): List<ComicPage> {
+        val comicEntity = comicDao.findById(comicId)
+        if (comicEntity == null) {
+            Log.e(TAG, "listPages: comic row MISSING for comicId=$comicId -> 返回空页")
+            return emptyList()
+        }
+        val source = sourceDao.findById(comicEntity.sourceId)?.toDomain()
+            ?: run {
+                Log.e(TAG, "listPages: source MISSING (sourceId=${comicEntity.sourceId}) for comicId=$comicId -> 返回空页")
+                return emptyList()
+            }
+
+        // 本地源：SAF 流直读，**不依赖 cache 行是否存在/状态**（清缓存后 cache 行可能被重置，
+        // 但不应影响本地源阅读——原始压缩包始终在用户存储中可读）。只要 comic+source 存在即可读。
+        // 扫描整个 SAF 流耗时较长，期间若 UI 协程被取消会抛 CancellationException，必须**重新抛出**；
+        // 且 SAF 直读失败时**绝不** fall through 到"复制整包"（超大文件失败点，违背"不复制"诉求）。
+        if (source.type == ComicSourceType.LOCAL) {
+            val streamPair = openArchiveStream(comicId)
+            if (streamPair != null) {
+                val (input, _) = streamPair
+                try {
+                    val entries = extractor.listImageEntries(input)
+                    if (entries.isNotEmpty()) {
+                        return entries.mapIndexed { index, entryName ->
+                            ComicPage(
+                                comicId = comicId,
+                                index = index,
+                                // "saf:<id>" 标识：PageImageCache 据此从 SAF 流按需解压单页。
+                                archivePath = "saf:$comicId",
+                                entryName = entryName
+                            )
+                        }
+                    }
+                } catch (ce: CancellationException) {
+                    runCatching { input.close() }
+                    throw ce
+                } catch (e: Exception) {
+                    Log.e(TAG, "SAF 流列举图片失败: ${e.message}", e)
+                }
+                runCatching { input.close() }
+                // SAF 流直读失败（非取消）：不再复制整包，直接返回空列表。
+                return emptyList()
+            }
+            // 连 SAF 流都打不开（极少见，如权限被撤），同样不复制，返回空。
+            return emptyList()
+        }
+
+        // 通用回退（SMB 源等）：解析出可读的本地压缩包文件（已下载副本）。
         val archiveFile = resolveArchiveFile(comicId) ?: return emptyList()
         val entries = extractor.listImageEntries(archiveFile)
         if (entries.isEmpty()) return emptyList()

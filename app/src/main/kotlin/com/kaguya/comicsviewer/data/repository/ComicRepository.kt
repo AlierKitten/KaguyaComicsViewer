@@ -7,6 +7,7 @@ import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ReadingProgress
 import kotlinx.coroutines.flow.Flow
 import java.io.File
+import java.io.InputStream
 
 interface ComicRepository {
     fun observeSources(): Flow<List<ComicSource>>
@@ -50,6 +51,13 @@ interface ComicRepository {
      * 若不存在或解析失败返回 null。
      */
     suspend fun resolveArchiveFile(comicId: Long): File?
+
+    /**
+     * 打开本地源原始压缩包的输入流（SAF 流直读，不复制压缩包）。
+     * 返回 (InputStream, 原始文件名) 或 null（非本地源 / 无法打开）。
+     * 调用方负责关闭 InputStream。
+     */
+    suspend fun openArchiveStream(comicId: Long): Pair<InputStream, String>?
 
     suspend fun updatePageCount(comicId: Long, count: Int)
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -35,6 +36,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -95,7 +97,7 @@ fun ReaderScreen(
         when {
             state.isLoading -> LoadingState()
             state.error != null -> ErrorState(error = state.error!!, onRetry = viewModel::retry, onBack = onBack)
-            state.pages.isEmpty() -> EmptyState()
+            state.pages.isEmpty() -> EmptyState(onRetry = viewModel::retry, onBack = onBack)
             else -> {
                 when (state.mode) {
                     ReadingMode.PAGED -> PagedReader(
@@ -408,12 +410,25 @@ private fun PageView(page: ComicPage, zoomEnabled: Boolean = false) {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(onRetry: () -> Unit = {}, onBack: () -> Unit = {}) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("未找到页面", color = Color.White)
             Spacer(Modifier.size(8.dp))
-            Text("请先在漫画库等待下载与解压完成", color = Color.White.copy(alpha = 0.6f))
+            Text(
+                "无法读取压缩包内容，可重试或返回漫画库",
+                color = Color.White.copy(alpha = 0.6f)
+            )
+            Spacer(Modifier.size(16.dp))
+            Row {
+                OutlinedButton(onClick = onBack) {
+                    Text("返回", color = Color.White)
+                }
+                Spacer(Modifier.width(12.dp))
+                Button(onClick = onRetry) {
+                    Text("重试")
+                }
+            }
         }
     }
 }

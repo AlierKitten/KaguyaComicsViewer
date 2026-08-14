@@ -2,6 +2,7 @@ package com.kaguya.comicsviewer.data.source.archive
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import me.zhanghai.android.libarchive.Archive
 import me.zhanghai.android.libarchive.ArchiveEntry
@@ -10,21 +11,21 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 压缩包图片提取器（仅支持 ZIP / CBZ，完全不支持 RAR / CBR）。
+ * 压缩包图片提取器（支持 ZIP / CBZ；本地源额外支持 InputStream 流直读）。
  *
- * 所有方法都要求传入一个**本地文件 File**（可被随机访问 / seek）。
- * 本地源通过 [com.kaguya.comicsviewer.data.repository.ComicRepository.resolveArchiveFile]
- * 取得真实路径直读文件或懒缓存副本；SMB 源使用已下载到本地的副本。
- * 因此本类不提供任何 InputStream 流模式实现。
+ * 本地文件模式：所有方法传入本地 [File]（可随机访问 / seek），用于 SMB 下载副本与本地源可直读路径。
+ * 解压主路径走 libarchive（可 seek，随机访问单页）；libarchive 列举为空时回退 JDK [ZipFile]。
  *
- * 解压主路径走 libarchive（对本地文件可 seek，随机访问单页，无需顺序重扫整包）；
- * 当 libarchive 对某本地 ZIP 列举/解压为空时，回退到 JDK [ZipFile]（对本地 ZIP 极可靠，
- * 支持子目录与中文路径）。
+ * 流模式（InputStream）：本地源无存储权限时，经由 SAF `ContentResolver` 输入流顺序读取原始压缩包，
+ * 不复制压缩包本身（仅解压单页到页缓存）。ZIP 用 libarchive 回调式读取，失败回退 JDK [ZipInputStream]。
+ * 顺序扫描对超大压缩包/大图友好，不会把整个压缩包读入内存。
  */
 @Singleton
 class ArchiveExtractor @Inject constructor() {
@@ -166,7 +167,175 @@ class ArchiveExtractor @Inject constructor() {
 
     // endregion
 
-    // region libarchive 遍历封装（仅本地 File，随机访问）
+    // region InputStream（SAF 流）读取 —— 本地源无存储权限时直读原始压缩包
+
+    /**
+     * 从输入流列举压缩包内所有图片条目（含子目录相对路径），按路径排序。
+     * 适用于本地源 SAF [InputStream]（无法随机访问，只能顺序扫描）。
+     * ZIP/CBZ 用 libarchive 回调式流读取，失败回退 JDK [ZipInputStream]（对中文路径/子目录可靠）。
+     */
+    suspend fun listImageEntries(input: InputStream): List<String> = withContext(Dispatchers.IO) {
+        val libarchiveList = try {
+            val list = mutableListOf<String>()
+            openFromStream(input) { ptr ->
+                walkEntries(ptr) { entry ->
+                    val path = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                    if (isImageName(path)) list.add(path)
+                    false
+                }
+            }
+            list
+        } catch (e: Exception) {
+            Log.w("ArchiveExtractor", "libarchive 流列举失败，回退 JDK: ${e.message}")
+            emptyList()
+        }
+        if (libarchiveList.isNotEmpty()) {
+            libarchiveList.sortedBy { it.lowercase() }
+        } else {
+            runCatching { listImageEntriesJdkStream(input) }.getOrDefault(emptyList())
+        }
+    }
+
+    /** 从流随机解压指定 entry 到目标文件（顺序扫描匹配 entryName）。 */
+    suspend fun extractImageToStream(
+        input: InputStream, entryName: String, target: File
+    ): Boolean = withContext(Dispatchers.IO) {
+        val ok = try {
+            var found = false
+            openFromStream(input) { ptr ->
+                walkEntries(ptr) { entry ->
+                    if (ArchiveEntry.pathnameUtf8(entry) == entryName) {
+                        extractCurrentEntry(ptr, target)
+                        found = true
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            found
+        } catch (e: Exception) {
+            Log.w("ArchiveExtractor", "libarchive 流解压失败，回退 JDK: ${e.message}")
+            false
+        }
+        if (ok) return@withContext true
+        runCatching { extractImageToJdkStream(input, entryName, target) }.getOrDefault(false)
+    }
+
+    /**
+     * 单次顺序扫描整个压缩包，把 [requests] 中所有尚未落盘的页一次性解压到各自目标文件。
+     * 相比每页单独开流重扫全包，本方法只打开一次 SAF 流、只扫一遍，极大减少超大压缩包下
+     * 的并发流数量与取消风暴（Compose 同时展示多页时不再 N 倍扫描）。
+     *
+     * [requests] 为 (entryName, target)，仅当 target 不存在或为空时才解压；返回成功解压的 entry 名集合。
+     */
+    suspend fun extractImagesToStream(
+        input: InputStream,
+        requests: List<Pair<String, File>>
+    ): Set<String> = withContext(Dispatchers.IO) {
+        val pending = requests.filter { (_, target) -> !(target.exists() && target.length() > 0) }
+            .toMutableList()
+        if (pending.isEmpty()) return@withContext requests.map { it.first }.toSet()
+
+        val ok = mutableSetOf<String>()
+        val wanted = pending.map { it.first }.toSet()
+        try {
+            openFromStream(input) { ptr ->
+                walkEntries(ptr) { entry ->
+                    // 扫描循环为同步 native 调用，无挂起点；主动检查取消，确保协程被取消时
+                    // 能立即中断扫描（而非一直读到包尾），尽快让 finally 释放 native 资源与流。
+                    coroutineContext.ensureActive()
+                    val name = ArchiveEntry.pathnameUtf8(entry) ?: return@walkEntries false
+                    if (name in wanted) {
+                        val idx = pending.indexOfFirst { it.first == name }
+                        if (idx >= 0) {
+                            val target = pending[idx].second
+                            extractCurrentEntry(ptr, target)
+                            ok.add(name)
+                            pending.removeAt(idx)
+                            if (pending.isEmpty()) return@walkEntries true // 全部解完，提前停止
+                        }
+                    }
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ArchiveExtractor", "libarchive 批量流解压失败，部分回退 JDK: ${e.message}")
+        }
+        // 仍缺失的页用 JDK ZipInputStream 逐条回退（每条重新从头扫，仅命中缺失页）
+        val missing = pending.filter { (name, _) -> name !in ok }
+        for ((name, target) in missing) {
+            if (runCatching { extractImageToJdkStream(input, name, target) }.getOrDefault(false)) {
+                ok.add(name)
+            }
+        }
+        ok
+    }
+
+    /** 从流读取指定 entry 的原始字节（用于封面）。 */
+    suspend fun readEntryStream(input: InputStream, entryName: String): ByteArray? = withContext(Dispatchers.IO) {
+        val bytes = try {
+            var result: ByteArray? = null
+            openFromStream(input) { ptr ->
+                walkEntries(ptr) { entry ->
+                    if (ArchiveEntry.pathnameUtf8(entry) == entryName) {
+                        result = readCurrentEntry(ptr)
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            result
+        } catch (e: Exception) {
+            Log.w("ArchiveExtractor", "libarchive 流读 entry 失败，回退 JDK: ${e.message}")
+            null
+        }
+        bytes ?: runCatching { readEntryJdkStream(input, entryName) }.getOrNull()
+    }
+
+    private fun listImageEntriesJdkStream(input: InputStream): List<String> {
+        ZipInputStream(input).use { zis ->
+            val list = mutableListOf<String>()
+            var ze = zis.nextEntry
+            while (ze != null) {
+                if (!ze.isDirectory && isImageName(ze.name)) list.add(ze.name)
+                ze = zis.nextEntry
+            }
+            return list.sortedBy { it.lowercase() }
+        }
+    }
+
+    private fun extractImageToJdkStream(input: InputStream, entryName: String, target: File): Boolean {
+        ZipInputStream(input).use { zis ->
+            var ze = zis.nextEntry
+            while (ze != null) {
+                if (ze.name == entryName && !ze.isDirectory) {
+                    FileOutputStream(target).use { out -> zis.copyTo(out, 256 * 1024) }
+                    return true
+                }
+                ze = zis.nextEntry
+            }
+        }
+        return false
+    }
+
+    private fun readEntryJdkStream(input: InputStream, entryName: String): ByteArray? {
+        ZipInputStream(input).use { zis ->
+            var ze = zis.nextEntry
+            while (ze != null) {
+                if (ze.name == entryName && !ze.isDirectory) {
+                    return zis.readBytes()
+                }
+                ze = zis.nextEntry
+            }
+        }
+        return null
+    }
+
+    // endregion
+
+    // region libarchive 遍历封装
 
     private inline fun walkEntries(archivePtr: Long, onEntry: (Long) -> Boolean) {
         var entry: Long
@@ -216,6 +385,47 @@ class ArchiveExtractor @Inject constructor() {
                 val bytes = ByteArray(read)
                 buffer.get(bytes)
                 fos.write(bytes)
+            }
+        }
+    }
+
+    /** 从 InputStream 打开 libarchive（回调式，无需文件 seek，适合 SAF 流）。 */
+    private inline fun openFromStream(input: InputStream, block: (Long) -> Unit) {
+        val archivePtr = Archive.readNew()
+        try {
+            Archive.readSupportFormatAll(archivePtr)
+            Archive.readSupportFilterAll(archivePtr)
+            val buf = ByteArray(BLOCK_SIZE)
+            // onRead 返回包含数据的 ByteBuffer；返回 null 表示 EOF。
+            // 必须返回 direct ByteBuffer，且不能复用同一 buffer 实例（libarchive 可能异步持有）。
+            val readCallback = object : Archive.ReadCallback<InputStream> {
+                override fun onRead(archive: Long, clientData: InputStream): java.nio.ByteBuffer? {
+                    val n = clientData.read(buf, 0, BLOCK_SIZE)
+                    if (n <= 0) return null
+                    val direct = java.nio.ByteBuffer.allocateDirect(n)
+                    direct.put(buf, 0, n)
+                    direct.flip()
+                    return direct
+                }
+            }
+            val openCallback = object : Archive.OpenCallback<InputStream> {
+                override fun onOpen(archive: Long, clientData: InputStream) = Unit
+            }
+            val closeCallback = object : Archive.CloseCallback<InputStream> {
+                override fun onClose(archive: Long, clientData: InputStream) {
+                    runCatching { clientData.close() }
+                }
+            }
+            Archive.readOpen(archivePtr, input, openCallback, readCallback, closeCallback)
+            block(archivePtr)
+        } catch (e: ArchiveException) {
+            Log.e("ArchiveExtractor", "libarchive 流读取失败: ${e.message}", e)
+        } catch (e: IOException) {
+            Log.e("ArchiveExtractor", "IO 错误: ${e.message}", e)
+        } finally {
+            try {
+                Archive.free(archivePtr)
+            } catch (_: Throwable) {
             }
         }
     }
