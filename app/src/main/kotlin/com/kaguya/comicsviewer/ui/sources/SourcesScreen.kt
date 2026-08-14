@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Stop
@@ -65,6 +66,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.kaguya.comicsviewer.data.source.smb.SmbClient
+import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
 import kotlinx.coroutines.launch
 
@@ -82,6 +84,7 @@ fun SourcesScreen(
     val stopping by viewModel.stopping.collectAsStateWithLifecycle()
     var showSmb by remember { mutableStateOf(false) }
     var pendingLocalName by remember { mutableStateOf<String?>(null) }
+    var renameTarget by remember { mutableStateOf<ComicSource?>(null) }
 
     // Toast 事件监听
     LaunchedEffect(Unit) {
@@ -168,6 +171,7 @@ fun SourcesScreen(
                         isScanning = row.source.id in scanningIds,
                         onToggle = { viewModel.toggleEnabled(row.source, it) },
                         onScan = { viewModel.scan(row.source) },
+                        onRename = { renameTarget = row.source },
                         onDelete = { viewModel.delete(row.source) }
                     )
                 }
@@ -185,6 +189,17 @@ fun SourcesScreen(
             }
         )
     }
+
+    renameTarget?.let { source ->
+        RenameSourceDialog(
+            currentName = source.name,
+            onDismiss = { renameTarget = null },
+            onConfirm = { newName ->
+                viewModel.renameSource(source, newName)
+                renameTarget = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -193,6 +208,7 @@ private fun SourceItem(
     isScanning: Boolean,
     onToggle: (Boolean) -> Unit,
     onScan: () -> Unit,
+    onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -229,9 +245,39 @@ private fun SourceItem(
                 if (isScanning) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 else Icon(Icons.Outlined.Refresh, null)
             }
+            IconButton(onClick = onRename) { Icon(Icons.Outlined.Edit, null) }
             IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, null, tint = MaterialTheme.colorScheme.error) }
         }
     }
+}
+
+@Composable
+private fun RenameSourceDialog(
+    currentName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember { mutableStateOf(currentName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名文件源") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.trim().isNotBlank() && name.trim() != currentName,
+                onClick = { onConfirm(name) }
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable

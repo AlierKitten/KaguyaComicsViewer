@@ -132,6 +132,14 @@ class SourcesViewModel @Inject constructor(
         }
     }
 
+    fun renameSource(source: ComicSource, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank() || trimmed == source.name) return
+        viewModelScope.launch {
+            repository.upsertSource(source.copy(name = trimmed))
+        }
+    }
+
     fun delete(source: ComicSource) {
         viewModelScope.launch { repository.deleteSource(source.id) }
     }
