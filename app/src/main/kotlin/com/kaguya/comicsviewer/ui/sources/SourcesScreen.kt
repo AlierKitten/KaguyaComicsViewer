@@ -168,7 +168,7 @@ fun SourcesScreen(
                 items(sources, key = { it.source.id }) { row ->
                     SourceItem(
                         row = row,
-                        isScanning = row.source.id in scanningIds,
+                        isScanning = row.source.id in scanningIds || row.source.indexStatus == com.kaguya.comicsviewer.domain.model.IndexStatus.SCANNING,
                         onToggle = { viewModel.toggleEnabled(row.source, it) },
                         onScan = { viewModel.scan(row.source) },
                         onRename = { renameTarget = row.source },
@@ -239,6 +239,23 @@ private fun SourceItem(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+                // 落库索引状态徽标：直观区分「真完成」与「未完成/失败」（进程被杀后也能恢复显示）
+                val statusLabel = when (row.source.indexStatus) {
+                    com.kaguya.comicsviewer.domain.model.IndexStatus.DONE ->
+                        "已索引 ${row.source.indexCurrent}/${row.source.indexTotal}" to MaterialTheme.colorScheme.primary
+                    com.kaguya.comicsviewer.domain.model.IndexStatus.FAILED ->
+                        "索引失败" to MaterialTheme.colorScheme.error
+                    com.kaguya.comicsviewer.domain.model.IndexStatus.CANCELLED ->
+                        "已取消" to MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> null
+                }
+                if (statusLabel != null) {
+                    Text(
+                        statusLabel.first,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusLabel.second
+                    )
+                }
             }
             Switch(checked = row.source.enabled, onCheckedChange = onToggle)
             IconButton(onClick = onScan, enabled = !isScanning) {

@@ -69,6 +69,12 @@ class ComicRepositoryImpl @Inject constructor(
     override suspend fun markSourceScanned(id: Long, timestamp: Long) =
         sourceDao.updateLastScanned(id, timestamp)
 
+    override suspend fun updateSourceIndex(id: Long, status: String, current: Int, total: Int) =
+        sourceDao.updateIndexProgress(id, status, current, total)
+
+    override suspend fun resetStaleIndexingStatuses() =
+        sourceDao.resetStaleIndexingStatuses()
+
     override fun observeComicsBySources(sourceIds: List<Long>): Flow<List<Comic>> =
         comicDao.observeBySources(sourceIds).map { list -> list.map { it.toDomain() } }
 

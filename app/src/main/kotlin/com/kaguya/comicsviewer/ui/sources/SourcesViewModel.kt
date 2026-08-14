@@ -1,6 +1,5 @@
 package com.kaguya.comicsviewer.ui.sources
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaguya.comicsviewer.data.prefs.SettingsRepository
@@ -12,11 +11,9 @@ import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
 import com.kaguya.comicsviewer.util.FormatUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -39,18 +36,13 @@ class SourcesViewModel @Inject constructor(
     val smbClient: SmbClient
 ) : ViewModel() {
 
-    // 独立刷新状态：存储正在扫描的源 ID
-    private val _scanningIds = MutableStateFlow<Set<Long>>(emptySet())
-    val scanningIds: StateFlow<Set<Long>> = _scanningIds.asStateFlow()
-
-    /** 是否有任意源正在扫描中。 */
-    val isIndexing: StateFlow<Boolean> = _scanningIds
+    // 后台 index 状态直接来自 ScanSourceUseCase（Application 级后台协程维护），
+    // 这样切页面 / 退到后台 / ViewModel 重建都不会丢失状态。
+    val scanningIds: StateFlow<Set<Long>> = scanUseCase.indexingIds
+    val isIndexing: StateFlow<Boolean> = scanUseCase.indexingIds
         .map { it.isNotEmpty() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
-    /** 是否请求过停止但扫描尚未完全退出（用于 UI 显示「正在停止…」）。 */
-    private val _stopping = MutableStateFlow(false)
-    val stopping: StateFlow<Boolean> = _stopping.asStateFlow()
+    val stopping: StateFlow<Boolean> = scanUseCase.isStopping
 
     // 每个源的漫画数量
     // 同 LibraryViewModel：comics.source_id 是 comic_sources 外键，toggle enabled 会让
@@ -95,7 +87,7 @@ class SourcesViewModel @Inject constructor(
                     enabled = true, lastScannedAt = null
                 )
             )
-            // 添加后自动刷新
+            // 添加后自动刷新（后台 index）
             scanSourceById(id)
         }
     }
@@ -121,7 +113,7 @@ class SourcesViewModel @Inject constructor(
                     enabled = true, lastScannedAt = null
                 )
             )
-            // 添加后自动刷新
+            // 添加后自动刷新（后台 index）
             scanSourceById(id)
         }
     }
@@ -144,99 +136,29 @@ class SourcesViewModel @Inject constructor(
         viewModelScope.launch { repository.deleteSource(source.id) }
     }
 
+    /**
+     * 在后台索引单个源。扫描在 Application 级后台协程中运行，不阻塞 UI，
+     * 可自由切到其他页面或退出应用；进程由前台保活服务守护。
+     */
     fun scan(source: ComicSource) {
-        viewModelScope.launch {
-            _stopping.value = false
-            scanUseCase.resetCancellation()
-            _scanningIds.value = _scanningIds.value + source.id
-            try {
-                val count = scanUseCase(
-                    source,
-                    onPhase1 = { n ->
-                        if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
-                        else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
-                    },
-                    onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
-                    onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
-                    indexCover = settings.settings.value.indexCoverOnScan
-                )
-                if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
-            } catch (e: Exception) {
-                Log.e("SourcesViewModel", "scan failed for ${source.name}", e)
-                _toastEvents.tryEmit("扫描失败：${e.message}")
-            } finally {
-                _scanningIds.value = _scanningIds.value - source.id
-                if (_scanningIds.value.isEmpty()) _stopping.value = false
-            }
-        }
+        scanUseCase.startScan(source)
+        _toastEvents.tryEmit("已在后台开始索引「${source.name}」")
     }
 
+    /** 在后台索引所有启用的源。 */
     fun scanAllEnabled() {
-        viewModelScope.launch {
-            val enabledSources = repository.listEnabledSources()
-            if (enabledSources.isEmpty()) return@launch
-            _stopping.value = false
-            scanUseCase.resetCancellation()
-            _scanningIds.value = enabledSources.map { it.id }.toSet()
-            try {
-                var totalFound = 0
-                for (s in enabledSources) {
-                    // 已被用户中止则提前结束后续源扫描
-                    if (_stopping.value) break
-                    try {
-                        val count = scanUseCase(
-                            s,
-                            onPhase1 = { n -> totalFound += n },
-                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") },
-                            onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
-                            indexCover = settings.settings.value.indexCoverOnScan
-                        )
-                    } catch (e: Exception) {
-                        Log.e("SourcesViewModel", "scan failed for ${s.name}", e)
-                        _toastEvents.tryEmit("扫描失败：${s.name} - ${e.message}")
-                    }
-                }
-                if (_stopping.value) {
-                    _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
-                } else if (totalFound == 0) {
-                    _toastEvents.tryEmit("扫描完成，未发现新漫画")
-                }
-            } finally {
-                _scanningIds.value = emptySet()
-                _stopping.value = false
-            }
-        }
+        scanUseCase.startScanAll()
+        _toastEvents.tryEmit("已在后台开始索引全部启用的文件源")
     }
 
-    /** 请求中止所有正在进行的索引。已写入数据库的漫画数据保留。 */
+    /** 请求中止所有正在进行的后台索引。已写入数据库的漫画数据保留。 */
     fun cancelIndexing() {
         scanUseCase.cancel()
-        _stopping.value = true
     }
 
+    /** 添加源后自动在后台索引该源。 */
     private suspend fun scanSourceById(sourceId: Long) {
         val source = repository.listEnabledSources().firstOrNull { it.id == sourceId } ?: return
-        _stopping.value = false
-        scanUseCase.resetCancellation()
-        _scanningIds.value = _scanningIds.value + sourceId
-        try {
-                val count = scanUseCase(
-                    source,
-                    onPhase1 = { n ->
-                        if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
-                        else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
-                    },
-                    onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
-                    onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
-                    indexCover = settings.settings.value.indexCoverOnScan
-                )
-            if (_stopping.value) _toastEvents.tryEmit("已停止索引，已扫描的数据已保留")
-        } catch (e: Exception) {
-            Log.e("SourcesViewModel", "scan failed for ${source.name}", e)
-            _toastEvents.tryEmit("扫描失败：${e.message}")
-        } finally {
-            _scanningIds.value = _scanningIds.value - sourceId
-            if (_scanningIds.value.isEmpty()) _stopping.value = false
-        }
+        scanUseCase.startScan(source)
     }
 }

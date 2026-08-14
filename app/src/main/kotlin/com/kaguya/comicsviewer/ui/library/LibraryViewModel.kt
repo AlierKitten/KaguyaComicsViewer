@@ -81,7 +81,11 @@ class LibraryViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val query = MutableStateFlow("")
-    private val scanning = MutableStateFlow(false)
+    // 后台 index 状态来自 ScanSourceUseCase（Application 级后台协程），
+    // 切页面 / 退到后台 / ViewModel 重建都不会丢失。
+    private val scanning = scanUseCase.indexingIds
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private val displayMode = MutableStateFlow(LibraryDisplayMode.GRID)
     private val showCovers = MutableStateFlow(true)
     private val sortField = MutableStateFlow(ComicSortField.NAME)
@@ -259,58 +263,18 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch { settings.setSortAscending(next) }
     }
 
+    /** 在后台索引所有启用的源（不阻塞 UI，可切页面 / 退到后台）。 */
     fun scanAll() {
-        viewModelScope.launch {
-            scanning.value = true
-            try {
-                val sources = repository.listEnabledSources()
-                var totalFound = 0
-                for (s in sources) {
-                    try {
-                        val count = scanUseCase(
-                            s,
-                            onPhase1 = { n -> totalFound += n },
-                            onPhase2 = { msg -> _toastEvents.tryEmit("${s.name}: $msg") },
-                            onRarSkipped = { n -> _toastEvents.tryEmit("已跳过 $n 个 RAR/CBR（暂不支持，仅支持 ZIP/CBZ）") },
-                            indexCover = settings.settings.value.indexCoverOnScan
-                        )
-                    } catch (e: Exception) {
-                        Log.e("LibraryViewModel", "scan failed for ${s.name}", e)
-                        _toastEvents.tryEmit("扫描失败：${s.name} - ${e.message}")
-                    }
-                }
-                if (totalFound == 0 && sources.isNotEmpty()) {
-                    _toastEvents.tryEmit("扫描完成，未发现新漫画")
-                }
-            } finally {
-                scanning.value = false
-            }
-        }
+        scanUseCase.startScanAll()
+        _toastEvents.tryEmit("已在后台开始索引全部启用的文件源")
     }
 
+    /** 在后台索引单个源。 */
     fun scanSource(sourceId: Long) {
         viewModelScope.launch {
-            scanning.value = true
-            try {
-                val sources = repository.listEnabledSources()
-                val source = sources.firstOrNull { it.id == sourceId }
-                if (source != null) {
-                    val count = scanUseCase(
-                        source,
-                        onPhase1 = { n ->
-                            if (n == 0) _toastEvents.tryEmit("未发现漫画文件")
-                            else _toastEvents.tryEmit("已发现 $n 个漫画，正在获取详细信息...")
-                        },
-                        onPhase2 = { msg -> _toastEvents.tryEmit(msg) },
-                        indexCover = settings.settings.value.indexCoverOnScan
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e("LibraryViewModel", "scanSource failed", e)
-                _toastEvents.tryEmit("扫描失败：${e.message}")
-            } finally {
-                scanning.value = false
-            }
+            val source = repository.listEnabledSources().firstOrNull { it.id == sourceId } ?: return@launch
+            scanUseCase.startScan(source)
+            _toastEvents.tryEmit("已在后台开始索引「${source.name}」")
         }
     }
 

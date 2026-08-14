@@ -1,5 +1,14 @@
 package com.kaguya.comicsviewer.domain.model
 
+/** 索引进度状态（落库，用于被杀后判断真实状态，避免误报完成）。 */
+enum class IndexStatus {
+    IDLE,       // 无索引记录
+    SCANNING,   // 正在索引
+    DONE,       // 已正常完成
+    CANCELLED,  // 被用户取消
+    FAILED      // 出错终止
+}
+
 /** 文件源配置（本地或 SMB）。 */
 data class ComicSource(
     val id: Long,
@@ -15,5 +24,11 @@ data class ComicSource(
     val password: String?,
     val domain: String?,
     val enabled: Boolean,
-    val lastScannedAt: Long?
+    val lastScannedAt: Long?,
+    /** 索引进度状态（落库）。 */
+    val indexStatus: IndexStatus = IndexStatus.IDLE,
+    /** 已处理的漫画数（落库，供被杀后判断）。 */
+    val indexCurrent: Int = 0,
+    /** 本次扫描预计处理的漫画总数（落库）。 */
+    val indexTotal: Int = 0
 )

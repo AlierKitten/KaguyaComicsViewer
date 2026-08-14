@@ -1,6 +1,13 @@
 package com.kaguya.comicsviewer.domain.usecase
 
+import android.app.Application
+import android.app.PendingIntent
+import android.content.Intent
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.kaguya.comicsviewer.MainActivity
+import com.kaguya.comicsviewer.data.prefs.SettingsRepository
 import com.kaguya.comicsviewer.data.repository.ComicRepository
 import com.kaguya.comicsviewer.data.source.DiscoveredComic
 import com.kaguya.comicsviewer.data.source.LocalFileScanner
@@ -10,24 +17,52 @@ import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
+import com.kaguya.comicsviewer.domain.model.IndexStatus
+import com.kaguya.comicsviewer.notification.NotificationChannels
 import com.kaguya.comicsviewer.util.CacheDirectories
+import com.kaguya.comicsviewer.work.IndexKeepAliveService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /** 扫描一个源：发现所有漫画并同步到数据库。 */
+@Singleton
 class ScanSourceUseCase @Inject constructor(
+    private val appContext: Application,
     private val repository: ComicRepository,
     private val localScanner: LocalFileScanner,
     private val smbScanner: SmbFileScanner,
-    private val cacheDirs: CacheDirectories
+    private val cacheDirs: CacheDirectories,
+    private val settings: SettingsRepository
 ) {
     companion object {
         private const val TAG = "ScanSourceUseCase"
+        private const val DONE_NOTIFY_ID = 5002
     }
+
+    /** 后台 index 协程作用域：绑定 Application 生命周期，不在 UI 协程中运行，
+     *  因此切页面、退出到后台、ViewModel 重建都不会中断 index。 */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 取消标志：由调用方在「开始一次扫描任务」前调用 resetCancellation() 清零；调用 cancel() 置为 true 后扫描循环应尽快中止（已写入的数据保留）。 */
     private val cancelled = AtomicBoolean(false)
+
+    /** 正在后台索引的源 ID 集合，供 UI 观察展示「扫描中」状态。 */
+    private val _indexingIds = MutableStateFlow<Set<Long>>(emptySet())
+    val indexingIds: StateFlow<Set<Long>> = _indexingIds.asStateFlow()
+
+    /** 是否已请求停止（用于 UI 显示「正在停止…」）。 */
+    private val _isStopping = MutableStateFlow(false)
+    val isStopping: StateFlow<Boolean> = _isStopping.asStateFlow()
 
     /** 重置取消标志（应在开始一次新的扫描任务时调用，不要在循环的每个源之前调用，否则会清除正在进行的取消请求）。 */
     fun resetCancellation() {
@@ -37,22 +72,165 @@ class ScanSourceUseCase @Inject constructor(
     /** 请求中止当前正在进行的扫描。 */
     fun cancel() {
         cancelled.set(true)
+        _isStopping.value = true
     }
 
     /** 当前是否请求中止。 */
     fun isCancelled(): Boolean = cancelled.get()
+
+    /** 按 ID 获取单个文件源（供后台索引调用）。 */
+    suspend fun getSource(sourceId: Long): ComicSource? =
+        repository.observeSources().first().firstOrNull { it.id == sourceId }
+
+    /** 是否正在后台索引。 */
+    fun isIndexing(): Boolean = _indexingIds.value.isNotEmpty()
+
+    /** 在后台开始索引单个源（不阻塞调用方，可自由切页面/退后台）。 */
+    fun startScan(source: ComicSource) {
+        val indexCover = settings.settings.value.indexCoverOnScan
+        scope.launch {
+            resetCancellation()
+            _isStopping.value = false
+            _indexingIds.value = _indexingIds.value + source.id
+            ensureKeepAlive()
+            try {
+                runSource(source, indexCover)
+                onIndexSettled(done = 1, failed = 0)
+            } catch (e: Exception) {
+                Log.e(TAG, "startScan failed for '${source.name}'", e)
+                onIndexSettled(done = 0, failed = 1)
+            } finally {
+                _indexingIds.value = _indexingIds.value - source.id
+            }
+        }
+    }
+
+    /** 在后台开始索引所有启用的源（顺序执行）。 */
+    fun startScanAll() {
+        scope.launch {
+            val sources = repository.listEnabledSources()
+            if (sources.isEmpty()) return@launch
+            resetCancellation()
+            _isStopping.value = false
+            _indexingIds.value = sources.map { it.id }.toSet()
+            ensureKeepAlive()
+            var done = 0
+            var failed = 0
+            try {
+                for (s in sources) {
+                    if (cancelled.get()) break
+                    try {
+                        runSource(s, settings.settings.value.indexCoverOnScan)
+                        done++
+                    } catch (e: Exception) {
+                        Log.e(TAG, "startScanAll failed for '${s.name}'", e)
+                        failed++
+                    }
+                }
+            } finally {
+                _indexingIds.value = emptySet()
+                onIndexSettled(done, failed)
+            }
+        }
+    }
+
+    /**
+     * 跑单个源的完整扫描，并在过程中：
+     * - 落库索引状态（SCANNING → DONE/CANCELLED/FAILED），防止进程被杀后误报完成；
+     * - 实时更新前台通知进度（仅百分比，不展示具体名字）。
+     */
+    private suspend fun runSource(source: ComicSource, indexCover: Boolean) {
+        repository.updateSourceIndex(source.id, IndexStatus.SCANNING.name, 0, 0)
+        IndexKeepAliveService.updateProgress(appContext, 0, 1)
+        try {
+            val found = invoke(
+                source,
+                indexCover = indexCover,
+                onPhase1 = { total ->
+                    // Phase1 完成：写入总数（已处理 0 / 总漫画数）；落库为异步写，不阻塞扫描回调
+                    scope.launch { repository.updateSourceIndex(source.id, IndexStatus.SCANNING.name, 0, total) }
+                    IndexKeepAliveService.updateProgress(appContext, 0, total)
+                },
+                onProgress = { current, total ->
+                    // Phase2 进度：已处理 / 总数
+                    scope.launch { repository.updateSourceIndex(source.id, IndexStatus.SCANNING.name, current, total) }
+                    IndexKeepAliveService.updateProgress(appContext, current, total)
+                }
+            )
+            if (cancelled.get()) {
+                // 用户中途取消，但数据已落库，记为 CANCELLED
+                repository.updateSourceIndex(source.id, IndexStatus.CANCELLED.name, found, found)
+            } else {
+                repository.updateSourceIndex(source.id, IndexStatus.DONE.name, found, found)
+                IndexKeepAliveService.updateProgress(appContext, found, found)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            repository.updateSourceIndex(source.id, IndexStatus.CANCELLED.name, 0, 0)
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "runSource failed for '${source.name}'", e)
+            repository.updateSourceIndex(source.id, IndexStatus.FAILED.name, 0, 0)
+            throw e
+        }
+    }
+
+    /** 当一组源全部索引结束（成功或取消）时调用：停止保活服务，必要时发完成通知。 */
+    private fun onIndexSettled(done: Int = 0, failed: Int = 0) {
+        if (_indexingIds.value.isEmpty()) {
+            IndexKeepAliveService.stop(appContext)
+            _isStopping.value = false
+            if (done > 0 || failed > 0) {
+                notifyDone(done, failed)
+            }
+        }
+    }
+
+    /** 确保保活前台服务在运行（仅首次进入索引时启动）。 */
+    private fun ensureKeepAlive() {
+        IndexKeepAliveService.start(appContext)
+    }
+
+    private fun notifyDone(done: Int, failed: Int) {
+        val text = when {
+            failed == 0 -> "已完成 $done 个文件源"
+            done == 0 -> "索引失败：$failed 个源未能扫描，请检查源配置"
+            else -> "已完成 $done 个源，$failed 个源失败"
+        }
+        val pi = PendingIntent.getActivity(
+            appContext,
+            DONE_NOTIFY_ID,
+            Intent(appContext, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(appContext, NotificationChannels.CHANNEL_GENERAL)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(if (failed == 0 && done > 0) "索引完成" else "索引结束")
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .build()
+        if (!IndexKeepAliveService.hasNotificationPermission(appContext)) return
+        try {
+            NotificationManagerCompat.from(appContext).notify(DONE_NOTIFY_ID, notification)
+        } catch (e: SecurityException) {
+            // 无 POST_NOTIFICATIONS 权限时忽略
+        }
+    }
+
     /**
      * 两阶段扫描：
      * 1. 快速索引所有漫画名（立即写入数据库，UI 可显示）
      * 2. 后台获取文件大小 + 生成封面
      *
-     * @param onPhase1 第一阶段完成时回调（参数为发现的漫画数）
-     * @param onPhase2 第二阶段进度回调（参数为进度文本）
+     * @param onPhase1 第一阶段完成时回调（参数为发现的漫画总数）
+     * @param onProgress Phase2 进度回调（参数依次为已处理数、总数）
+     * @param onPhase2 第二阶段进度文本回调（保留，用于日志/埋点）
      * @param onRarSkipped 本地源发现不支持的 RAR/CBR 数量时回调（用于提示用户）
      */
     suspend operator fun invoke(
         source: ComicSource,
         onPhase1: (Int) -> Unit = {},
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
         onPhase2: (String) -> Unit = {},
         onRarSkipped: (Int) -> Unit = {},
         indexCover: Boolean = true
@@ -149,6 +327,9 @@ class ScanSourceUseCase @Inject constructor(
             return found.size
         }
 
+        val total = needsSize.size + needsCover.size
+        var processed = 0
+
         // 2a. 获取文件大小
         if (needsSize.isNotEmpty()) {
             onPhase2("正在获取文件大小共 (${needsSize.size} 个漫画)...")
@@ -164,10 +345,14 @@ class ScanSourceUseCase @Inject constructor(
                             }
                         }
                     }
+                    processed++
+                    onProgress(processed, total)
                 }
                 Log.d(TAG, "phase2: fetched ${sizes.size} file sizes")
             } catch (e: Exception) {
                 Log.w(TAG, "phase2: fetchSizes failed", e)
+                processed += needsSize.size
+                onProgress(processed, total)
             }
         }
 
@@ -204,6 +389,8 @@ class ScanSourceUseCase @Inject constructor(
                         Log.w(TAG, "phase2: cover generation failed for '${d.title}': ${e.message}")
                         stillFailing.add(comic to d)
                     }
+                    processed++
+                    onProgress(processed, total)
                 }
                 pending = stillFailing
                 val remaining = pending.size

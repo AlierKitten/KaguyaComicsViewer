@@ -16,7 +16,7 @@ import com.kaguya.comicsviewer.data.local.entity.ReadingProgressEntity
         ComicCacheEntity::class,
         ReadingProgressEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class KaguyaDatabase : RoomDatabase() {

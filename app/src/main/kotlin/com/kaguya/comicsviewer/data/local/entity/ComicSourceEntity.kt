@@ -17,5 +17,11 @@ data class ComicSourceEntity(
     @ColumnInfo(name = "password") val password: String?,
     @ColumnInfo(name = "domain") val domain: String?,
     @ColumnInfo(name = "enabled") val enabled: Boolean,
-    @ColumnInfo(name = "last_scanned_at") val lastScannedAt: Long?
+    @ColumnInfo(name = "last_scanned_at") val lastScannedAt: Long?,
+    /** 索引进度状态：idle / scanning / done / cancelled / failed */
+    @ColumnInfo(name = "index_status") val indexStatus: String?,
+    /** 已处理的漫画数（用于断点续传/被杀后判断） */
+    @ColumnInfo(name = "index_current") val indexCurrent: Int,
+    /** 本次扫描预计处理的漫画总数 */
+    @ColumnInfo(name = "index_total") val indexTotal: Int
 )

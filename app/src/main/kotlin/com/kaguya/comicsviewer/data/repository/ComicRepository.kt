@@ -16,6 +16,11 @@ interface ComicRepository {
     suspend fun upsertSource(source: ComicSource): Long
     suspend fun deleteSource(id: Long)
     suspend fun markSourceScanned(id: Long, timestamp: Long)
+    /** 落库索引进度（状态 + 已处理/总数），供被杀后判断真实状态与断点续传。 */
+    suspend fun updateSourceIndex(id: Long, status: String, current: Int, total: Int)
+
+    /** 应用启动时调用：将残留的 SCANNING 状态（进程被杀导致）重置，避免 UI 误以为索引仍在进行或已完成。 */
+    suspend fun resetStaleIndexingStatuses()
 
     fun observeComicsBySources(sourceIds: List<Long>): Flow<List<Comic>>
     fun observeAllComics(): Flow<List<Comic>>

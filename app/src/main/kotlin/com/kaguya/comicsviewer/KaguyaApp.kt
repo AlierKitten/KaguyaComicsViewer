@@ -13,6 +13,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -20,6 +24,9 @@ import javax.inject.Inject
 
 @HiltAndroidApp
 class KaguyaApp : Application(), Configuration.Provider {
+
+    /** 应用级后台协程作用域（进程级生命周期）。 */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
@@ -31,6 +38,12 @@ class KaguyaApp : Application(), Configuration.Provider {
     @InstallIn(SingletonComponent::class)
     interface ImageLoaderEntryPoint {
         fun archiveFetcher(): ArchiveFetcher
+    }
+
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface RepositoryEntryPoint {
+        fun comicRepository(): com.kaguya.comicsviewer.data.repository.ComicRepository
     }
 
     override fun onCreate() {
@@ -68,11 +81,23 @@ class KaguyaApp : Application(), Configuration.Provider {
         Log.d("KaguyaApp", "MMKV initialized, dir=$mmkvDir")
         notificationChannels.ensureCreated()
         Log.d("KaguyaApp", "Notification channels created")
+
+        // 清理残留的「正在索引」状态：若上次进程被系统杀死，comic_sources 中可能
+        // 残留 SCANNING 记录，会导致 UI 误以为索引仍在进行或已完成。重置为 IDLE。
+        val repo = EntryPointAccessors.fromApplication(this, RepositoryEntryPoint::class.java)
+            .comicRepository()
+        appScope.launch {
+            try {
+                repo.resetStaleIndexingStatuses()
+            } catch (e: Exception) {
+                Log.w("KaguyaApp", "resetStaleIndexingStatuses failed", e)
+            }
+        }
     }
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
-            .setMinimumLoggingLevel(android.util.Log.DEBUG)
+            .setMinimumLoggingLevel(Log.DEBUG)
             .build()
 }

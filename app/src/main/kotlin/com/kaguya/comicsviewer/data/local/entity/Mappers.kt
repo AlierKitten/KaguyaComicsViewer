@@ -5,6 +5,7 @@ import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
+import com.kaguya.comicsviewer.domain.model.IndexStatus
 import com.kaguya.comicsviewer.domain.model.ReadingProgress
 
 fun ComicSourceEntity.toDomain(): ComicSource = ComicSource(
@@ -19,7 +20,10 @@ fun ComicSourceEntity.toDomain(): ComicSource = ComicSource(
     password = password,
     domain = domain,
     enabled = enabled,
-    lastScannedAt = lastScannedAt
+    lastScannedAt = lastScannedAt,
+    indexStatus = runCatching { IndexStatus.valueOf(indexStatus ?: "IDLE") }.getOrDefault(IndexStatus.IDLE),
+    indexCurrent = indexCurrent,
+    indexTotal = indexTotal
 )
 
 fun ComicSource.toEntity(): ComicSourceEntity = ComicSourceEntity(
@@ -34,7 +38,10 @@ fun ComicSource.toEntity(): ComicSourceEntity = ComicSourceEntity(
     password = password,
     domain = domain,
     enabled = enabled,
-    lastScannedAt = lastScannedAt
+    lastScannedAt = lastScannedAt,
+    indexStatus = indexStatus.name,
+    indexCurrent = indexCurrent,
+    indexTotal = indexTotal
 )
 
 fun ComicEntity.toDomain(): Comic = Comic(
