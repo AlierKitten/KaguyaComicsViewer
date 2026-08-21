@@ -356,38 +356,64 @@ class ScanSourceUseCase @Inject constructor(
             }
         }
 
-        // 2b. 生成封面（带自动重试：统计未获取封面数，有减少趋势就继续重试，直到不再减少或全部完成）
+        // 2b. 生成封面（带重试，且能识别「假成功」）
+        // 修复点：
+        //  1) 原逻辑「剩余数不再减少就停」不区分失败类型，会把临时失败（下轮能成功）与永久
+        //     index 失败（压缩包本身读不出）一起丢弃。现改为连续失败达阈值(MAX_CONSECUTIVE_FAILS)
+        //     轮才判为永久失败移出 retry 池；只要还有临时失败项就继续重试。
+        //  2) 原逻辑只判 coverBytes != null，但 downscaleCover 在压缩失败/数据残缺时可能返回
+        //     非空却无效的字节，导致「日志全成功、UI 却加载不出」的假成功。现写入前校验字节
+        //     能解码为有效 Bitmap(outWidth>0)，无效视为失败(null)，使其进入 retry/永久失败判定。
         if (indexCover && needsCover.isNotEmpty()) {
-            // pending 持有「漫画 + 原始发现项」对，失败时留到下一轮重试
             val comicsByPath = repository.listComicsBySources(listOf(source.id)).associateBy { it.filePath }
             var pending = needsCover.mapNotNull { d -> comicsByPath[d.relativePath]?.let { c -> c to d } }
                 .filter { (comic, _) -> comic.coverPath == null }
+            val consecutiveFails = mutableMapOf<Long, Int>()
+            val MAX_CONSECUTIVE_FAILS = 3
             var round = 0
-            var prevSize = pending.size
-            onPhase2("正在生成封面共 (${pending.size} 个漫画)...")
+            onPhase2("正在生成封面 (${pending.size} 个漫画)...")
             while (pending.isNotEmpty() && !cancelled.get()) {
                 round++
                 val stillFailing = mutableListOf<Pair<Comic, DiscoveredComic>>()
                 var successInRound = 0
                 for ((comic, d) in pending) {
-                    // 数据库里可能已被上轮更新，重新读取最新 coverPath
                     val latest = repository.findComic(comic.id)
                     if (latest?.coverPath != null) continue
                     try {
                         val coverBytes = scanner.cover(source, d)
-                        if (coverBytes != null) {
+                        // 校验：非空且能解码为有效 Bitmap 才算真正成功，避免残缺/空字节的假成功
+                        val valid = coverBytes != null && coverBytes.size > 0 && runCatching {
+                            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            android.graphics.BitmapFactory.decodeByteArray(coverBytes, 0, coverBytes.size, opts)
+                            opts.outWidth > 0 && opts.outHeight > 0
+                        }.getOrDefault(false)
+                        if (valid) {
                             val coverFile = cacheDirs.coverFile(comic.id)
                             coverFile.parentFile?.mkdirs()
                             FileOutputStream(coverFile).use { it.write(coverBytes) }
                             repository.upsertComic(comic.copy(coverPath = coverFile.absolutePath))
                             successInRound++
+                            consecutiveFails.remove(comic.id)
                             Log.d(TAG, "phase2: cover generated for comicId=${comic.id}, title='${d.title}'")
                         } else {
-                            stillFailing.add(comic to d)
+                            val fails = consecutiveFails.getOrDefault(comic.id, 0) + 1
+                            consecutiveFails[comic.id] = fails
+                            if (fails < MAX_CONSECUTIVE_FAILS) {
+                                stillFailing.add(comic to d)
+                                Log.w(TAG, "phase2: cover 无效(假成功)，第 $fails 轮，重试 comicId=${comic.id}, title='${d.title}'")
+                            } else {
+                                Log.w(TAG, "phase2: cover 连续 $fails 轮无效，判定为永久失败，跳过 '${d.title}'")
+                            }
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "phase2: cover generation failed for '${d.title}': ${e.message}")
-                        stillFailing.add(comic to d)
+                        val fails = consecutiveFails.getOrDefault(comic.id, 0) + 1
+                        consecutiveFails[comic.id] = fails
+                        if (fails < MAX_CONSECUTIVE_FAILS) {
+                            stillFailing.add(comic to d)
+                            Log.w(TAG, "phase2: cover generation failed for '${d.title}': ${e.message}")
+                        } else {
+                            Log.w(TAG, "phase2: cover 连续 $fails 轮异常(${e.message})，判定为永久失败，跳过 '${d.title}'")
+                        }
                     }
                     processed++
                     onProgress(processed, total)
@@ -398,17 +424,19 @@ class ScanSourceUseCase @Inject constructor(
                     onPhase2("封面已全部生成完成")
                     break
                 }
-                // 有减少趋势（本轮有成功且数量在下降）才继续重试，否则停止避免无谓循环
-                if (successInRound == 0 || remaining >= prevSize) {
-                    onPhase2("有 $remaining 个封面未能获取，请检查网络或稍后刷新重试")
-                    break
+                // 仅当本轮零成功且 remaining 中已无未达永久失败阈值的项时才停止（避免对永久失败空转，也不漏可成功封面）
+                if (successInRound == 0) {
+                    val hasRetryable = pending.any { (comic, _) -> (consecutiveFails[comic.id] ?: 0) < MAX_CONSECUTIVE_FAILS }
+                    if (!hasRetryable) {
+                        onPhase2("${remaining} 个封面永久获取失败（index 失败），已停止重试")
+                        Log.w(TAG, "phase2: 共 $remaining 个永久失败封面，停止重试")
+                        break
+                    }
                 }
-                prevSize = remaining
-                onPhase2("第 $round 轮完成，仍有 $remaining 个封面未获取，正在重试...")
-                // 轮间退避，让 SMB 连接释放，缓解连接数上限
+                onPhase2("第 $round 轮完成，仍有 $remaining 个封面待重试，正在重试...")
                 kotlinx.coroutines.delay(1500L)
             }
-            Log.d(TAG, "phase2: covers done, remaining pending=${pending.size}")
+            Log.d(TAG, "phase2: covers done, round=$round, remaining pending=${pending.size}")
         }
 
         onPhase2("扫描完成")

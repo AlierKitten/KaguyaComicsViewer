@@ -3,13 +3,13 @@ package com.kaguya.comicsviewer.data.source.archive
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor.Companion.COVER_TARGET_SIZE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import me.zhanghai.android.libarchive.Archive
 import me.zhanghai.android.libarchive.ArchiveEntry
 import me.zhanghai.android.libarchive.ArchiveException
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -178,6 +178,22 @@ class ArchiveExtractor @Inject constructor() {
         if (detectType(fileName) == null) return null
         val coverBytes = readFirstImageEntry(input) ?: return null
         return downscaleCover(coverBytes)
+    }
+
+    /**
+     * 从「可重开的流」读取封面（按图片名排序后的第一张），与 [readCover]（File 版）及阅读器
+     * [listPages] 的封面选取保持一致（均是按路径排序后的首图）。
+     *
+     * 因 SAF/SMB 流不可 seek，无法一遍扫描同时「按名排序取首图 + 读其字节」，故分两遍：
+     * 第一遍 [listImageEntries] 取排序后首名，第二遍 [readEntryStream] 读其字节。
+     * [openStream] 在每遍各自重新打开原始压缩包流，避免消费已耗尽的流。
+     */
+    suspend fun readCoverStreamSorted(openStream: () -> InputStream?, fileName: String): ByteArray? = withContext(Dispatchers.IO) {
+        if (detectType(fileName) == null) return@withContext null
+        val first = openStream()?.use { runCatching { listImageEntries(it) }.getOrElse { emptyList() } }?.firstOrNull()
+            ?: return@withContext null
+        val raw = runCatching { openStream()?.use { readEntryStream(it, first) } }.getOrNull() ?: return@withContext null
+        return@withContext downscaleCover(raw)
     }
 
     /** 单次顺序扫描流，返回第一个图片 entry 的原始字节；命中即停止（不再继续扫后续条目）。 */

@@ -13,6 +13,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.kaguya.comicsviewer.MainActivity
 import com.kaguya.comicsviewer.notification.NotificationChannels
+import com.kaguya.comicsviewer.work.IndexKeepAliveService.Companion.stop
 
 /**
  * 轻量前台保活服务：仅用于在前台显示一个「正在后台索引」通知，

@@ -124,13 +124,15 @@ class LocalFileScanner @Inject constructor(
         }
         val file = cur ?: return@withContext null
         val fileName = discovered.relativePath.substringAfterLast('/')
-        // 流式读取原始压缩包，顺序扫描到第一张图即停止（命中即中断），不复制整个压缩包到缓存。
+        // 按名排序取首图作封面（与阅读器 listPages / readCover(File) 选取一致）；
+        // 流不可 seek，故用可重开流分两遍：列举排序首名 + 读其字节。
         return@withContext try {
-            context.contentResolver.openInputStream(file.uri)?.use { input ->
-                extractor.readCoverStream(input, fileName)
-            }
+            extractor.readCoverStreamSorted(
+                openStream = { context.contentResolver.openInputStream(file.uri) },
+                fileName = fileName
+            )
         } catch (e: Exception) {
-            Log.w("ComicScanner", "本地源封面回退失败: ${e.message}")
+            Log.w("ComicScanner", "本地源封面读取失败: ${e.message}")
             null
         }
     }
