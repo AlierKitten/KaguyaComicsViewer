@@ -363,4 +363,11 @@ class LibraryViewModel @Inject constructor(
             repository.clearAllProgress()
         }
     }
+
+    /** 清除单条阅读记录 */
+    fun clearProgress(comicId: Long) {
+        viewModelScope.launch {
+            repository.deleteProgress(comicId)
+        }
+    }
 }

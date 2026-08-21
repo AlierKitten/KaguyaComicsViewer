@@ -98,6 +98,9 @@ class ReaderViewModel @Inject constructor(
                 comic = updatedComic, pages = list, page = page, mode = s.readingMode,
                 keepScreenOn = s.keepScreenOn, isLoading = false, error = null
             )
+            // 加载完成后立即保存一次进度，确保"继续阅读"列表能恢复该漫画记录
+            // （清除记录后重新打开若不翻页，reading_progress 仍为空，列表不会显示）。
+            viewModelScope.launch { saveProgress(comicId, page, page >= (list.size - 2).coerceAtLeast(0) && list.isNotEmpty()) }
             // 预取附近页
             prefetch(page)
         }

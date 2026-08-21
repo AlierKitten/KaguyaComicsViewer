@@ -350,6 +350,10 @@ class ComicRepositoryImpl @Inject constructor(
         comicDao.clearAllProgress()
     }
 
+    override suspend fun deleteProgress(comicId: Long) {
+        comicDao.deleteProgress(comicId)
+    }
+
     override suspend fun clearAllCoverPaths() {
         comicDao.clearAllCoverPaths()
     }

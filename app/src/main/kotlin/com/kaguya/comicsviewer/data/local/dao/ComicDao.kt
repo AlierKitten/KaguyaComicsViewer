@@ -85,6 +85,9 @@ interface ComicDao {
     @Query("DELETE FROM reading_progress")
     suspend fun clearAllProgress()
 
+    @Query("DELETE FROM reading_progress WHERE comic_id = :comicId")
+    suspend fun deleteProgress(comicId: Long)
+
     @Query("SELECT * FROM comic_cache WHERE comic_id = :comicId")
     fun observeCache(comicId: Long): Flow<ComicCacheEntity?>
 

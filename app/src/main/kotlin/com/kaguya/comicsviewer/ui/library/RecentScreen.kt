@@ -156,7 +156,8 @@ fun RecentScreen(
                                     else -> viewModel.startLoading(row.comic.id, row.comic.title)
                                 }
                             },
-                            onCancel = { viewModel.cancelLoading(row.comic.id) }
+                            onCancel = { viewModel.cancelLoading(row.comic.id) },
+                            onClear = { viewModel.clearProgress(row.comic.id) }
                         )
                     }
                 }
@@ -174,7 +175,8 @@ private fun RecentListItem(
     row: ComicRow,
     showCover: Boolean,
     onClick: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onClear: () -> Unit
 ) {
     val isLoading = row.cache?.state in listOf(
         CacheState.PENDING, CacheState.DOWNLOADING, CacheState.DOWNLOADED, CacheState.EXTRACTING
@@ -307,6 +309,13 @@ private fun RecentListItem(
                 }
             }
             
+            IconButton(onClick = onClear) {
+                Icon(
+                    Icons.Outlined.CleaningServices,
+                    contentDescription = "清除阅读记录",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (isLoading) {
                 IconButton(onClick = onCancel) {
                     Icon(

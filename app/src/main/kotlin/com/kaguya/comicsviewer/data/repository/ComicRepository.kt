@@ -68,5 +68,8 @@ interface ComicRepository {
 
     suspend fun clearAllProgress()
 
+    /** 清除单条漫画的阅读进度记录。 */
+    suspend fun deleteProgress(comicId: Long)
+
     suspend fun clearAllCoverPaths()
 }
