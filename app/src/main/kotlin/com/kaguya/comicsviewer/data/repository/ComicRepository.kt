@@ -66,6 +66,15 @@ interface ComicRepository {
 
     suspend fun updatePageCount(comicId: Long, count: Int)
 
+    /**
+     * 特殊尝试：对[常规扫描封面失败]的漫画，复用阅读器同款「SAF 流直读」路径重新生成封面。
+     * - 本地源：openArchiveStream(comicId)（SAF 流，不受 scoped storage 文件权限影响）
+     *   + listPages(comicId) 取按名排序首图 + readEntryStream 解压单页 + 降采样。
+     *   该路径只把字节读入内存，不落盘整包副本/页缓存，封面文件即为唯一产物，天然无额外缓存残留。
+     * - 非本地源 / 无法打开流：返回 null（由调用方按永久失败处理）。
+     */
+    suspend fun tryGenerateCoverViaStream(comicId: Long): ByteArray?
+
     suspend fun clearAllProgress()
 
     /** 清除单条漫画的阅读进度记录。 */

@@ -240,7 +240,7 @@ class ArchiveExtractor @Inject constructor() {
      * 计算 [BitmapFactory.Options.inSampleSize] 降采样，最后以 JPEG quality 80 压缩输出。
      * 直接返回原始 entry 字节会导致索引/列表加载大量原始大图（如 20MB 单图），故必须压缩。
      */
-    private fun downscaleCover(bytes: ByteArray): ByteArray? {
+    internal fun downscaleCover(bytes: ByteArray): ByteArray? {
         return runCatching {
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
@@ -250,6 +250,31 @@ class ArchiveExtractor @Inject constructor() {
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts) ?: return@runCatching null
             ByteArrayOutputStream().use { out ->
                 bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                bmp.recycle()
+                out.toByteArray()
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * 与阅读器 [ReaderViewModel.generateThumbnail] 完全一致的封面缩略图生成：
+     * 以 [maxWidth] 为最长边目标、取 2 的幂次 inSampleSize 降采样、JPEG quality=[quality] 输出。
+     * 用于扫描阶段「特殊尝试」生成封面，确保与阅读器产物一致。
+     */
+    internal fun generateCoverThumbnail(bytes: ByteArray, maxWidth: Int = 300, quality: Int = 75): ByteArray? {
+        return runCatching {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            var sampleSize = 1
+            if (options.outWidth > maxWidth) {
+                sampleSize = (options.outWidth.toFloat() / maxWidth).toInt()
+            }
+            var power = 1
+            while (power * 2 <= sampleSize) power *= 2
+            val decodeOptions = BitmapFactory.Options().apply { inSampleSize = power }
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions) ?: return@runCatching null
+            ByteArrayOutputStream().use { out ->
+                bmp.compress(Bitmap.CompressFormat.JPEG, quality, out)
                 bmp.recycle()
                 out.toByteArray()
             }

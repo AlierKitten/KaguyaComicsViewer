@@ -372,6 +372,32 @@ class ScanSourceUseCase @Inject constructor(
             val MAX_CONSECUTIVE_FAILS = 3
             var round = 0
             onPhase2("正在生成封面 (${pending.size} 个漫画)...")
+            // 写出封面文件（含 DB 标记）
+            suspend fun writeCover(comic: Comic, bytes: ByteArray) {
+                val coverFile = cacheDirs.coverFile(comic.id)
+                coverFile.parentFile?.mkdirs()
+                FileOutputStream(coverFile).use { it.write(bytes) }
+                repository.upsertComic(comic.copy(coverPath = coverFile.absolutePath))
+            }
+            // 特殊尝试：常规 scanner.cover 连续失败达阈值的漫画，复用阅读器同款路径重新生成封面。
+            // 本地源走 SAF 流直读，SMB 源走已下载副本（resolveArchiveFile + File 解压），
+            // 两种源都覆盖，因为漫画阅读器本就同时支持本地与 SMB 源。
+            // 该路径只把字节读入内存/临时目录、读后即删，封面文件即唯一产物，天然无额外缓存残留。
+            // 返回 true 表示抢救成功。
+            suspend fun specialStreamTry(comic: Comic): Boolean {
+                Log.d(TAG, "specialStreamTry: 进入 comicId=${comic.id}, source.type=${source.type}")
+                val bytes = repository.tryGenerateCoverViaStream(comic.id) ?: return false
+                val ok = bytes.isNotEmpty() && runCatching {
+                    val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                    opts.outWidth > 0 && opts.outHeight > 0
+                }.getOrDefault(false)
+                if (ok) {
+                    writeCover(comic, bytes)
+                    return true
+                }
+                return false
+            }
             while (pending.isNotEmpty() && !cancelled.get()) {
                 round++
                 val stillFailing = mutableListOf<Pair<Comic, DiscoveredComic>>()
@@ -379,6 +405,7 @@ class ScanSourceUseCase @Inject constructor(
                 for ((comic, d) in pending) {
                     val latest = repository.findComic(comic.id)
                     if (latest?.coverPath != null) continue
+                    var recovered = false
                     try {
                         val coverBytes = scanner.cover(source, d)
                         // 校验：非空且能解码为有效 Bitmap 才算真正成功，避免残缺/空字节的假成功
@@ -388,10 +415,7 @@ class ScanSourceUseCase @Inject constructor(
                             opts.outWidth > 0 && opts.outHeight > 0
                         }.getOrDefault(false)
                         if (valid) {
-                            val coverFile = cacheDirs.coverFile(comic.id)
-                            coverFile.parentFile?.mkdirs()
-                            FileOutputStream(coverFile).use { it.write(coverBytes) }
-                            repository.upsertComic(comic.copy(coverPath = coverFile.absolutePath))
+                            writeCover(comic, coverBytes)
                             successInRound++
                             consecutiveFails.remove(comic.id)
                             Log.d(TAG, "phase2: cover generated for comicId=${comic.id}, title='${d.title}'")
@@ -402,7 +426,15 @@ class ScanSourceUseCase @Inject constructor(
                                 stillFailing.add(comic to d)
                                 Log.w(TAG, "phase2: cover 无效(假成功)，第 $fails 轮，重试 comicId=${comic.id}, title='${d.title}'")
                             } else {
-                                Log.w(TAG, "phase2: cover 连续 $fails 轮无效，判定为永久失败，跳过 '${d.title}'")
+                                // 达阈值：先特殊尝试阅读器同款 SAF 流路径
+                                recovered = specialStreamTry(comic)
+                                if (recovered) {
+                                    successInRound++
+                                    consecutiveFails.remove(comic.id)
+                                    Log.d(TAG, "phase2: 特殊尝试(SAF 流)成功生成封面 comicId=${comic.id}, title='${d.title}'")
+                                } else {
+                                    Log.w(TAG, "phase2: cover 连续 $fails 轮无效且特殊尝试失败，判定为永久失败，跳过 '${d.title}'")
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -412,11 +444,20 @@ class ScanSourceUseCase @Inject constructor(
                             stillFailing.add(comic to d)
                             Log.w(TAG, "phase2: cover generation failed for '${d.title}': ${e.message}")
                         } else {
-                            Log.w(TAG, "phase2: cover 连续 $fails 轮异常(${e.message})，判定为永久失败，跳过 '${d.title}'")
+                            recovered = specialStreamTry(comic)
+                            if (recovered) {
+                                successInRound++
+                                consecutiveFails.remove(comic.id)
+                                Log.d(TAG, "phase2: 特殊尝试(SAF 流)成功生成封面 comicId=${comic.id}, title='${d.title}'")
+                            } else {
+                                Log.w(TAG, "phase2: cover 连续 $fails 轮异常(${e.message})且特殊尝试失败，判定为永久失败，跳过 '${d.title}'")
+                            }
                         }
                     }
-                    processed++
-                    onProgress(processed, total)
+                    if (!recovered) {
+                        processed++
+                        onProgress(processed, total)
+                    }
                 }
                 pending = stillFailing
                 val remaining = pending.size
@@ -424,11 +465,11 @@ class ScanSourceUseCase @Inject constructor(
                     onPhase2("封面已全部生成完成")
                     break
                 }
-                // 仅当本轮零成功且 remaining 中已无未达永久失败阈值的项时才停止（避免对永久失败空转，也不漏可成功封面）
+                // 仅当本轮零成功且 remaining 中已无未达永久失败阈值的项（含特殊尝试已尽力）时才停止
                 if (successInRound == 0) {
                     val hasRetryable = pending.any { (comic, _) -> (consecutiveFails[comic.id] ?: 0) < MAX_CONSECUTIVE_FAILS }
                     if (!hasRetryable) {
-                        onPhase2("${remaining} 个封面永久获取失败（index 失败），已停止重试")
+                        onPhase2("${remaining} 个封面永久获取失败（含特殊尝试），已停止重试")
                         Log.w(TAG, "phase2: 共 $remaining 个永久失败封面，停止重试")
                         break
                     }

@@ -9,6 +9,7 @@ import com.kaguya.comicsviewer.data.local.dao.ComicSourceDao
 import com.kaguya.comicsviewer.data.local.entity.toDomain
 import com.kaguya.comicsviewer.data.local.entity.toEntity
 import com.kaguya.comicsviewer.data.source.archive.ArchiveExtractor
+import com.kaguya.comicsviewer.data.source.smb.SmbClient
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.domain.model.Comic
 import com.kaguya.comicsviewer.domain.model.ComicCache
@@ -20,9 +21,13 @@ import com.kaguya.comicsviewer.util.CacheDirectories
 import com.kaguya.comicsviewer.util.FileDescriptorCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,7 +38,8 @@ class ComicRepositoryImpl @Inject constructor(
     private val sourceDao: ComicSourceDao,
     private val comicDao: ComicDao,
     private val cacheDirs: CacheDirectories,
-    private val extractor: ArchiveExtractor
+    private val extractor: ArchiveExtractor,
+    private val smbClient: SmbClient
 ) : ComicRepository {
 
     private companion object {
@@ -344,6 +350,161 @@ class ComicRepositoryImpl @Inject constructor(
 
     override suspend fun updatePageCount(comicId: Long, count: Int) {
         comicDao.updatePageCount(comicId, count)
+    }
+
+    override suspend fun tryGenerateCoverViaStream(comicId: Long): ByteArray? = withContext(Dispatchers.IO) {
+        Log.d(TAG, "tryGenerateCoverViaStream: 被调用 comicId=$comicId")
+        val comic = findComic(comicId) ?: run {
+            Log.w(TAG, "tryGenerateCoverViaStream: comic 不存在 comicId=$comicId")
+            return@withContext null
+        }
+        val source = sourceDao.findById(comic.sourceId)?.toDomain() ?: run {
+            Log.w(TAG, "tryGenerateCoverViaStream: source 不存在 comicId=$comicId")
+            return@withContext null
+        }
+
+        // SMB（非本地）源：扫描阶段往往尚未下载压缩包，resolveArchiveFile 为空会导致无法确定首图。
+        // 这里先确保压缩包已落到本地缓存（未下载则同步下载），与「点开阅读→下载→出封面」同款路径。
+        // 下载得到的副本作为正常阅读缓存保留，不算封面加载产生的临时缓存。
+        if (source.type != ComicSourceType.LOCAL) {
+            val ready = ensureArchiveDownloaded(comic)
+            if (ready == null) {
+                Log.w(TAG, "tryGenerateCoverViaStream: SMB 源确保下载失败，comicId=$comicId")
+                return@withContext null
+            }
+            Log.d(TAG, "tryGenerateCoverViaStream: SMB 源已就绪 archiveFile=${ready.absolutePath}, comicId=$comicId")
+        }
+
+        // 复用阅读器同款列举：按名排序首图（与阅读器 ensureCover 一致）
+        val firstEntryName = runCatching { pickCoverEntryName(comicId) }.getOrNull()
+        if (firstEntryName.isNullOrBlank()) {
+            Log.w(TAG, "tryGenerateCoverViaStream: 无法确定首图 entryName，comicId=$comicId")
+            return@withContext null
+        }
+        Log.d(TAG, "tryGenerateCoverViaStream: 首图 entry=$firstEntryName, source.type=${source.type}, comicId=$comicId")
+
+        // 临时目录：整包顺序解压首图到这里，读字节后立即删除，不残留任何封面外缓存
+        // （满足「清除因加载封面产生的缓存」诉求）。
+        val tmpDir = File(context.cacheDir, "cover_tmp_$comicId").apply { mkdirs() }
+        val target = File(tmpDir, "first.bin")
+        try {
+            var thumb: ByteArray? = null
+
+            if (source.type == ComicSourceType.LOCAL) {
+                // 本地源：SAF 流直读（不复制压缩包），与阅读器体验一致
+                openArchiveStream(comicId)?.let { (input, _) ->
+                    try {
+                        val ok = extractor.extractImagesToStream(input, listOf(firstEntryName to target))
+                        Log.d(TAG, "tryGenerateCoverViaStream: 本地源整包解压首图 ok=$ok, target=${target.length()}, comicId=$comicId")
+                        if (ok.isNotEmpty() && target.exists() && target.length() > 0) {
+                            thumb = extractor.generateCoverThumbnail(target.readBytes(), maxWidth = 300, quality = 75)
+                        }
+                        if (thumb == null) {
+                            // 整包解压失败，回退 SAF 流直读单页
+                            val raw = extractor.readEntryStream(input, firstEntryName)
+                            Log.d(TAG, "tryGenerateCoverViaStream: 本地源回退 readEntryStream raw=${raw?.size ?: -1}, comicId=$comicId")
+                            if (raw != null && raw.isNotEmpty()) {
+                                thumb = extractor.generateCoverThumbnail(raw, maxWidth = 300, quality = 75)
+                            }
+                        }
+                    } finally {
+                        input.close()
+                    }
+                }
+            } else {
+                // SMB 源（及其他非本地源）：压缩包已下载到本地缓存，用 File 随机访问解压，
+                // extractImageTo 含 libarchive + JDK ZipFile 双重回退，对特殊/损坏 ZIP 最稳。
+                val archiveFile = resolveArchiveFile(comicId)
+                if (archiveFile == null) {
+                    Log.w(TAG, "tryGenerateCoverViaStream: SMB 源 resolveArchiveFile 为空（未下载？），comicId=$comicId")
+                } else {
+                    val ok = extractor.extractImageTo(archiveFile, firstEntryName, target)
+                    Log.d(TAG, "tryGenerateCoverViaStream: SMB 源整包解压首图 ok=$ok, target=${target.length()}, comicId=$comicId")
+                    if (ok && target.exists() && target.length() > 0) {
+                        thumb = extractor.generateCoverThumbnail(target.readBytes(), maxWidth = 300, quality = 75)
+                    }
+                }
+            }
+
+            Log.d(TAG, "tryGenerateCoverViaStream: 生成 thumb=${thumb?.size ?: -1} 字节, comicId=$comicId")
+            thumb
+        } catch (e: Exception) {
+            Log.w(TAG, "tryGenerateCoverViaStream: 异常 comicId=$comicId: ${e.message}", e)
+            null
+        } finally {
+            tmpDir.deleteRecursively()
+        }
+    }
+
+    /** 按名排序取首图 entry 名（与阅读器 listPages 封面选取一致）。 */
+    private suspend fun pickCoverEntryName(comicId: Long): String? {
+        val pages = listPages(comicId)
+        return pages.firstOrNull()?.entryName
+    }
+
+    /**
+     * 确保 SMB（非本地）漫画的压缩包已落地到本地缓存。
+     * - 已下载（resolveArchiveFile 非空）直接返回该文件；
+     * - 未下载则同步从 SMB 拉取压缩包到 [CacheDirectories.archiveFile]，下载完成后写缓存行为 READY。
+     * 返回落地后的文件，失败返回 null。
+     */
+    private suspend fun ensureArchiveDownloaded(comic: Comic): File? = withContext(Dispatchers.IO) {
+        val existing = resolveArchiveFile(comic.id)
+        if (existing != null) {
+            Log.d(TAG, "ensureArchiveDownloaded: 已存在，直接复用 comicId=${comic.id}, file=${existing.absolutePath}")
+            return@withContext existing
+        }
+        val source = sourceDao.findById(comic.sourceId)?.toDomain() ?: run {
+            Log.w(TAG, "ensureArchiveDownloaded: source 不存在 comicId=${comic.id}")
+            return@withContext null
+        }
+        if (source.type == ComicSourceType.LOCAL) {
+            // 本地源不下载，交给 openArchiveStream 流直读
+            return@withContext null
+        }
+        val remote = comic.filePath
+        if (remote.isBlank()) {
+            Log.w(TAG, "ensureArchiveDownloaded: remote path 为空 comicId=${comic.id}")
+            return@withContext null
+        }
+        val outFile = cacheDirs.archiveFile(comic.id, comic.filePath)
+        outFile.parentFile?.mkdirs()
+        Log.d(TAG, "ensureArchiveDownloaded: 开始下载 SMB 压缩包 comicId=${comic.id}, out=${outFile.absolutePath}, remote='$remote'")
+        val ok = runCatching {
+            smbClient.readFile(source, remote) { input ->
+                FileOutputStream(outFile).use { out ->
+                    val buf = ByteArray(256 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                    }
+                }
+            }
+        }.onFailure { Log.e(TAG, "ensureArchiveDownloaded: 下载异常 comicId=${comic.id}: ${it.message}", it) }
+            .isSuccess
+        if (!ok || !outFile.exists() || outFile.length() == 0L) {
+            Log.w(TAG, "ensureArchiveDownloaded: 下载失败或文件为空 comicId=${comic.id}")
+            outFile.delete()
+            return@withContext null
+        }
+        // 写缓存行，使后续阅读/解压都能命中（与 DownloadComicWorker 同款落点）
+        val isZip = extractor.detectType(outFile.name)?.isZip == true
+        if (isZip) {
+            upsertCache(
+                ComicCache(
+                    comicId = comic.id,
+                    state = CacheState.READY,
+                    archiveFile = outFile.absolutePath,
+                    extractedDir = null,
+                    totalBytes = outFile.length(),
+                    downloadedBytes = outFile.length(),
+                    lastError = null
+                )
+            )
+        }
+        Log.d(TAG, "ensureArchiveDownloaded: 下载完成 comicId=${comic.id}, size=${outFile.length()}")
+        outFile
     }
 
     override suspend fun clearAllProgress() {
