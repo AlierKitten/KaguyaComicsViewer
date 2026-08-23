@@ -76,6 +76,7 @@ class SettingsViewModel @Inject constructor(
     fun setShowCovers(enabled: Boolean) = viewModelScope.launch { settings.setShowCovers(enabled) }
     fun setIndexCoverOnScan(enabled: Boolean) = viewModelScope.launch { settings.setIndexCoverOnScan(enabled) }
     fun setHideFromRecents(enabled: Boolean) = viewModelScope.launch { settings.setHideFromRecents(enabled) }
+    fun setLanguage(code: String) = viewModelScope.launch { settings.setLanguage(code) }
 
     /** 立即刷新存储占用统计。 */
     fun refreshStorage() {

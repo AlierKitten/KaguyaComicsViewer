@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KaguyaCV</string>
+    <string name="tab_library">ライブラリ</string>
+    <string name="tab_recent">続きから読む</string>
+    <string name="tab_sources">ソース</string>
+    <string name="tab_settings">設定</string>
+
+    <string name="empty_library">まだ漫画がありません。ソースを追加してください</string>
+    <string name="empty_sources">利用可能なソースがありません</string>
+    <string name="add_source">ソースを追加</string>
+    <string name="add_local_source">ローカルフォルダを選択</string>
+    <string name="add_smb_source">SMB リモートソースを追加</string>
+    <string name="scan_now">今すぐスキャン</string>
+    <string name="scanning">スキャン中…</string>
+    <string name="last_scan">前回のスキャン：%1$s</string>
+    <string name="never_scanned">まだスキャンしていません</string>
+
+    <string name="source_name">名前</string>
+    <string name="source_host">ホスト</string>
+    <string name="source_host_required">ホスト *</string>
+    <string name="source_share">共有名</string>
+    <string name="source_share_required">共有名 *</string>
+    <string name="source_path">パス</string>
+    <string name="source_username">ユーザー名</string>
+    <string name="source_username_required">ユーザー名 *</string>
+    <string name="source_password">パスワード</string>
+    <string name="source_domain">ドメイン（任意）</string>
+    <string name="source_port">ポート</string>
+    <string name="save">保存</string>
+    <string name="cancel">キャンセル</string>
+    <string name="delete">削除</string>
+    <string name="test_connection">接続をテスト</string>
+
+    <string name="downloading">ダウンロード中</string>
+    <string name="extracting">展開中</string>
+    <string name="ready_to_read">読書可能</string>
+    <string name="pending">保留</string>
+    <string name="failed">失敗</string>
+    <string name="retry">再試行</string>
+    <string name="cancel_download">ダウンロードをキャンセル</string>
+    <string name="clear_cache">キャッシュを削除</string>
+    <string name="clear_cache_comic">この漫画のキャッシュを削除</string>
+    <string name="continue_reading">続きから読む</string>
+    <string name="recent">最近読んだ漫画</string>
+    <string name="all">すべて</string>
+
+    <string name="page_indicator">%1$d / %2$d ページ</string>
+    <string name="reading_mode">読書モード</string>
+    <string name="mode_paged">ページ送り（左右）</string>
+    <string name="mode_continuous">連続スクロール（上下）</string>
+    <string name="mode_webtoon">ウェブトゥーン（ストリップ）</string>
+
+    <string name="permission_required">ダウンロード進捗を表示するには通知権限が必要です</string>
+    <string name="ok">OK</string>
+
+    <string name="cache_size">キャッシュ：%1$s</string>
+    <string name="free_space">空き容量：%1$s</string>
+
+    <!-- Library / Recent -->
+    <string name="sort">並べ替え</string>
+    <string name="toggle_view">表示を切り替え</string>
+    <string name="scan">スキャン</string>
+    <string name="refresh">更新</string>
+    <string name="clear">クリア</string>
+    <string name="search_comics">漫画を検索</string>
+    <string name="sort_name">名前</string>
+    <string name="sort_size">サイズ</string>
+    <string name="sort_date">日付</string>
+    <string name="empty_recent">読書履歴がありません</string>
+    <string name="empty_recent_hint">漫画を読み始めると、ここに進捗が表示されます</string>
+    <string name="clear_history">履歴をクリア</string>
+    <string name="finished">読了</string>
+    <string name="read_progress">%1$d / %2$s ページ読了</string>
+    <string name="state_ready">準備完了</string>
+    <string name="state_downloading">ダウンロード中 %1$s</string>
+    <string name="state_extracting">展開中…</string>
+    <string name="state_downloaded">ダウンロード済み、展開待ち</string>
+    <string name="state_pending">読み込み待ち</string>
+    <string name="state_failed">読み込み失敗</string>
+    <string name="cache_loading">読み込み中…</string>
+    <string name="cache_waiting">待機中</string>
+    <string name="loading_title_pending">準備中…</string>
+    <string name="loading_title_loading">読み込み中…</string>
+    <string name="loading_title_extracting">展開中…</string>
+    <string name="loading_title_done">読み込み完了！</string>
+    <string name="loading_title_failed">読み込み失敗</string>
+    <string name="please_wait">しばらくお待ちください…</string>
+    <string name="close">閉じる</string>
+    <string name="background_loading">バックグラウンドで読み込む</string>
+    <string name="cancel_loading">読み込みをキャンセル</string>
+    <string name="add_source_hint">ソースページでローカルまたは SMB ソースを追加してください</string>
+    <string name="unknown_error">不明なエラー</string>
+
+    <!-- Sources -->
+    <string name="sources_title">ソース</string>
+    <string name="add_source_title">ソースを追加</string>
+    <string name="source_type_local">ローカル</string>
+    <string name="source_type_smb">SMB</string>
+    <string name="source_display_name">ソース</string>
+    <string name="rename">名前を変更</string>
+    <string name="rename_source">ソースの名前を変更</string>
+    <string name="source_type">種類</string>
+    <string name="local_folder">ローカルフォルダ</string>
+    <string name="smb_remote">SMB リモート</string>
+    <string name="add_smb_title">SMB ソースを追加</string>
+    <string name="port_optional">ポート（任意）</string>
+    <string name="connect_and_list">接続してパスを取得</string>
+    <string name="use_current_dir">現在のディレクトリを使用</string>
+    <string name="loading">読み込み中…</string>
+    <string name="connection_idle">ホスト、共有名、認証情報を入力してから接続をテストしてください</string>
+    <string name="connection_testing">接続をテスト中…</string>
+    <string name="connection_success">接続成功</string>
+    <string name="connection_failed">接続失敗：%1$s</string>
+    <string name="field_required">%1$s は必須項目です</string>
+    <string name="source_exists">同じ名前のソースが既に存在します</string>
+    <string name="source_saved">ソースを保存しました</string>
+    <string name="source_save_failed">ソースの保存に失敗：%1$s</string>
+    <string name="source_deleted">ソースを削除しました</string>
+    <string name="source_rename_empty">名前を空にすることはできません</string>
+    <string name="stop_indexing">インデックスを停止</string>
+    <string name="refresh_all">すべて更新</string>
+    <string name="indexed_status">インデックス済み %1$d/%2$d</string>
+    <string name="index_failed">インデックス失敗</string>
+    <string name="index_cancelled">キャンセル済み</string>
+    <string name="connection_no_shares">接続成功しましたが、共有が見つかりませんでした。共有名を手動で入力してください。</string>
+    <string name="browse">参照</string>
+    <string name="select_share">共有を選択</string>
+    <string name="dir_empty">（このディレクトリは空です）</string>
+    <string name="password_optional">空欄の場合はパスワードなし</string>
+    <string name="local_source_sub">ローカル · %1$s</string>
+    <string name="smb_source_sub">SMB %1$s/%2$s · %3$s</string>
+    <string name="scanned_comics_count">%1$d 作品をスキャンしました</string>
+    <string name="empty_source_comics">このソースにはまだ漫画がありません</string>
+
+    <!-- Settings -->
+    <string name="settings_title">設定</string>
+    <string name="section_reading">読書</string>
+    <string name="default_reading_mode">デフォルトの読書モード</string>
+    <string name="keep_screen_on">画面を常時オン</string>
+    <string name="keep_screen_on_summary">読書中に画面が消えないようにする</string>
+    <string name="covers">表紙</string>
+    <string name="show_covers">表紙を表示</string>
+    <string name="show_covers_summary">漫画の表紙サムネイルを表示する</string>
+    <string name="index_covers">スキャン時に表紙をインデックス</string>
+    <string name="index_covers_summary">ソースのスキャン中に表紙サムネイルを生成する</string>
+    <string name="section_storage">ストレージ</string>
+    <string name="cache_label">キャッシュ：</string>
+    <string name="covers_label">封面：</string>
+    <string name="cleaning">クリーニング中…</string>
+    <string name="clear_all_cache">すべてのキャッシュを削除</string>
+    <string name="clear_all_covers">すべての封面を削除</string>
+    <string name="clear_cache_confirm">読み込み済みの漫画キャッシュをすべて削除します。再度読むには再読み込みが必要です。続行しますか？</string>
+    <string name="clear_covers_confirm">漫画の封面サムネイルをすべて削除します。ソースを更新すると再生成されます。続行しますか？</string>
+    <string name="section_theme">テーマ</string>
+    <string name="follow_system_theme">システムテーマに従う</string>
+    <string name="follow_system_theme_summary">システムのライト/ダークモード設定を使用する</string>
+    <string name="dark_mode">ダークモード</string>
+    <string name="dark_mode_summary">ダークモードを手動で有効にする</string>
+    <string name="dynamic_theme_color">動的テーマカラー</string>
+    <string name="dynamic_theme_color_summary">システムのアクセントカラーを使用（Android 12+）</string>
+    <string name="section_privacy">プライバシー</string>
+    <string name="hide_task_preview">最近のタスクのプレビューを非表示</string>
+    <string name="hide_task_preview_summary">最近のタスク画面でアプリの内容をぼかすか非表示にする</string>
+    <string name="section_language">言語</string>
+    <string name="language_summary">アプリの表示言語を選択</string>
+    <string name="language_zh_cn">中国語（簡体字）</string>
+    <string name="language_en_us">英語（米国）</string>
+    <string name="language_ja_jp">日本語</string>
+    <string name="toast_indexing_started">バックグラウンドでインデックスを開始しました…</string>
+    <string name="toast_indexing_started_named">バックグラウンドで「%1$s」のインデックスを開始しました…</string>
+    <string name="toast_cover_cleared">封面をクリアしました</string>
+    <string name="toast_cache_cleared">キャッシュをクリアしました</string>
+    <string name="toast_no_source">まずソースを追加してください</string>
+    <string name="toast_permission_denied">権限が拒否されました：%1$s</string>
+    <string name="toast_already_scanning">既にスキャン中です</string>
+    <string name="toast_scan_failed">スキャン失敗：%1$s</string>
+    <string name="toast_load_failed">読み込み失敗：%1$s</string>
+
+    <!-- Reader -->
+    <string name="current_mode">現在のモード：%1$s</string>
+    <string name="page_indicator_click">%1$d / %2$d ページ（タップで移動）</string>
+    <string name="jump_title">ページに移動</string>
+    <string name="jump_total">全 %1$d ページ</string>
+    <string name="jump">移動</string>
+    <string name="load_failed">読み込み失敗</string>
+    <string name="no_pages">ページが見つかりません</string>
+    <string name="no_pages_hint">アーカイブの内容を読み取れません。再試行するかライブラリに戻ってください</string>
+    <string name="back">戻る</string>
+
+    <!-- Notifications -->
+    <string name="notify_indexing_title">バックグラウンドで漫画ライブラリをインデックス中</string>
+    <string name="notify_indexing_scanning">ソースをスキャン中です。他のページに切り替えるかアプリを終了しても構いません。完了時に通知します</string>
+    <string name="notify_indexing_progress">漫画ライブラリをインデックス中、%1$d%% 完了</string>
+    <string name="notify_loading_title">読み込み中：%1$s</string>
+    <string name="notify_ready_title">準備完了：%1$s</string>
+    <string name="notify_ready_text">タップして読書開始</string>
+    <string name="notify_failed_title">読み込み失敗：%1$s</string>
+</resources>

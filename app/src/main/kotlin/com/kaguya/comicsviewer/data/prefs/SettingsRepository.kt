@@ -2,6 +2,7 @@ package com.kaguya.comicsviewer.data.prefs
 
 import com.kaguya.comicsviewer.domain.model.ComicSortField
 import com.kaguya.comicsviewer.domain.model.ReadingMode
+import com.kaguya.comicsviewer.util.LocaleHelper
 import com.tencent.mmkv.MMKV
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +21,8 @@ data class AppSettings(
     val indexCoverOnScan: Boolean = true,
     val sortField: ComicSortField = ComicSortField.NAME,
     val sortAscending: Boolean = true,
-    val hideFromRecents: Boolean = false
+    val hideFromRecents: Boolean = false,
+    val language: String = LocaleHelper.DEFAULT
 )
 
 @Singleton
@@ -40,6 +42,7 @@ class SettingsRepository @Inject constructor() {
     private val keySortField = "sort_field"
     private val keySortAscending = "sort_ascending"
     private val keyHideFromRecents = "hide_from_recents"
+    private val keyLanguage = "language"
 
     private fun readSettings(): AppSettings = AppSettings(
         readingMode = kv.decodeString(keyReadingMode)?.let { runCatching { ReadingMode.valueOf(it) }.getOrNull() }
@@ -55,7 +58,8 @@ class SettingsRepository @Inject constructor() {
         sortField = kv.decodeString(keySortField)?.let { runCatching { ComicSortField.valueOf(it) }.getOrNull() }
             ?: ComicSortField.NAME,
         sortAscending = kv.decodeBool(keySortAscending, true),
-        hideFromRecents = kv.decodeBool(keyHideFromRecents, false)
+        hideFromRecents = kv.decodeBool(keyHideFromRecents, false),
+        language = kv.decodeString(keyLanguage) ?: LocaleHelper.DEFAULT
     )
 
     private val _settings = MutableStateFlow(readSettings())
@@ -124,4 +128,14 @@ class SettingsRepository @Inject constructor() {
         kv.encode(keyHideFromRecents, enabled)
         emit()
     }
+
+    fun setLanguage(code: String) {
+        val lang = if (LocaleHelper.SUPPORTED.contains(code)) code else LocaleHelper.DEFAULT
+        kv.encode(keyLanguage, lang)
+        emit()
+    }
+
+    fun getLanguage(): String =
+        kv.decodeString(keyLanguage)?.takeIf { LocaleHelper.SUPPORTED.contains(it) }
+            ?: LocaleHelper.DEFAULT
 }

@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.reader
 
+import com.kaguya.comicsviewer.R
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -151,11 +153,11 @@ fun ReaderScreen(
                         }
                         viewModel.setMode(nextMode)
                         val modeName = when (nextMode) {
-                            ReadingMode.PAGED -> "左右翻页"
-                            ReadingMode.CONTINUOUS -> "上下翻页"
-                            ReadingMode.WEBTOON -> "条带滚动"
+                            ReadingMode.PAGED -> context.getString(R.string.mode_paged)
+                            ReadingMode.CONTINUOUS -> context.getString(R.string.mode_continuous)
+                            ReadingMode.WEBTOON -> context.getString(R.string.mode_webtoon)
                         }
-                        Toast.makeText(context, "当前模式：$modeName", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.current_mode, modeName), Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Outlined.SwapHoriz, null, tint = Color.White)
                     }
@@ -176,7 +178,7 @@ fun ReaderScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "第 ${state.page + 1} / ${state.pages.size} 页  (点击跳转)",
+                        stringResource(R.string.page_indicator_click, state.page + 1, state.pages.size),
                         color = Color.White,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -208,10 +210,10 @@ private fun JumpDialog(
     var text by remember { mutableStateOf(current.toString()) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("跳转到第几页") },
+        title = { Text(stringResource(R.string.jump_title)) },
         text = {
             Column {
-                Text("共 $total 页", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.jump_total, total), style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.size(8.dp))
                 OutlinedTextField(
                     value = text,
@@ -226,10 +228,10 @@ private fun JumpDialog(
             Button(onClick = {
                 val target = text.toIntOrNull()?.coerceIn(1, total) ?: current
                 onConfirm(target)
-            }) { Text("跳转") }
+            }) { Text(stringResource(R.string.jump)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         }
     )
 }
@@ -396,7 +398,7 @@ private fun PageView(page: ComicPage, zoomEnabled: Boolean = false) {
             contentDescription = null,
             contentScale = ContentScale.Fit,
             loading = { CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(28.dp), color = Color.White.copy(alpha = 0.5f)) },
-            error = { Text("加载失败", color = Color.White) },
+            error = { Text(stringResource(R.string.load_failed), color = Color.White) },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -413,20 +415,20 @@ private fun PageView(page: ComicPage, zoomEnabled: Boolean = false) {
 private fun EmptyState(onRetry: () -> Unit = {}, onBack: () -> Unit = {}) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("未找到页面", color = Color.White)
+            Text(stringResource(R.string.no_pages), color = Color.White)
             Spacer(Modifier.size(8.dp))
             Text(
-                "无法读取压缩包内容，可重试或返回漫画库",
+                stringResource(R.string.no_pages_hint),
                 color = Color.White.copy(alpha = 0.6f)
             )
             Spacer(Modifier.size(16.dp))
             Row {
                 OutlinedButton(onClick = onBack) {
-                    Text("返回", color = Color.White)
+                    Text(stringResource(R.string.back), color = Color.White)
                 }
                 Spacer(Modifier.width(12.dp))
                 Button(onClick = onRetry) {
-                    Text("重试")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }
@@ -439,7 +441,7 @@ private fun LoadingState() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Color.White, modifier = Modifier.size(40.dp))
             Spacer(Modifier.size(12.dp))
-            Text("加载中...", color = Color.White.copy(alpha = 0.7f))
+            Text(stringResource(R.string.loading), color = Color.White.copy(alpha = 0.7f))
         }
     }
 }
@@ -448,7 +450,7 @@ private fun LoadingState() {
 private fun ErrorState(error: String, onRetry: () -> Unit, onBack: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("加载失败", color = Color.White, style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.load_failed), color = Color.White, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.size(8.dp))
             Text(error, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.size(16.dp))
@@ -457,10 +459,10 @@ private fun ErrorState(error: String, onRetry: () -> Unit, onBack: () -> Unit) {
                     onClick = onBack,
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f))
                 ) {
-                    Text("返回", color = Color.White)
+                    Text(stringResource(R.string.back), color = Color.White)
                 }
                 Button(onClick = onRetry) {
-                    Text("重试")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }

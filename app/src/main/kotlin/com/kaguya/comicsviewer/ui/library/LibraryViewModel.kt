@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.library
 
+import com.kaguya.comicsviewer.R
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +14,7 @@ import com.kaguya.comicsviewer.domain.model.ComicSourceType
 import com.kaguya.comicsviewer.domain.usecase.CancelDownloadUseCase
 import com.kaguya.comicsviewer.domain.usecase.DownloadComicUseCase
 import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
+import com.kaguya.comicsviewer.util.ToastEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,7 +119,7 @@ class LibraryViewModel @Inject constructor(
     val loadingProgress: StateFlow<LoadingProgress?> = _loadingProgress.asStateFlow()
 
     // Toast 一次性事件
-    private val _toastEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _toastEvents = MutableSharedFlow<ToastEvent>(extraBufferCapacity = 1)
     val toastEvents = _toastEvents.asSharedFlow()
 
     // 将单个 Comic 包装成带 cache + progress 的 ComicRow Flow
@@ -266,7 +268,7 @@ class LibraryViewModel @Inject constructor(
     /** 在后台索引所有启用的源（不阻塞 UI，可切页面 / 退到后台）。 */
     fun scanAll() {
         scanUseCase.startScanAll()
-        _toastEvents.tryEmit("已在后台开始索引全部启用的文件源")
+        _toastEvents.tryEmit(ToastEvent(R.string.toast_indexing_started, emptyArray()))
     }
 
     /** 在后台索引单个源。 */
@@ -274,7 +276,7 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             val source = repository.listEnabledSources().firstOrNull { it.id == sourceId } ?: return@launch
             scanUseCase.startScan(source)
-            _toastEvents.tryEmit("已在后台开始索引「${source.name}」")
+            _toastEvents.tryEmit(ToastEvent(R.string.toast_indexing_started_named, arrayOf(source.name)))
         }
     }
 

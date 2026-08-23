@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.Brightness6
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -28,10 +29,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -44,11 +49,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.kaguya.comicsviewer.R
 import com.kaguya.comicsviewer.domain.model.ReadingMode
+import com.kaguya.comicsviewer.util.LocaleHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,16 +73,16 @@ fun SettingsScreen(
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            title = { Text("清除所有缓存") },
-            text = { Text("将删除所有已加载的漫画缓存文件，需要重新加载才能阅读。确定继续？") },
+            title = { Text(stringResource(R.string.clear_all_cache)) },
+            text = { Text(stringResource(R.string.clear_cache_confirm)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.clearAllCache()
                     showClearDialog = false
-                }) { Text("确定", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.ok), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) { Text("取消") }
+                TextButton(onClick = { showClearDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -80,21 +90,21 @@ fun SettingsScreen(
     if (showClearCoversDialog) {
         AlertDialog(
             onDismissRequest = { showClearCoversDialog = false },
-            title = { Text("清除所有封面") },
-            text = { Text("将删除所有漫画的封面缩略图，刷新文件源后会重新生成。确定继续？") },
+            title = { Text(stringResource(R.string.clear_all_covers)) },
+            text = { Text(stringResource(R.string.clear_covers_confirm)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.clearAllCovers()
                     showClearCoversDialog = false
-                }) { Text("确定", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.ok), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showClearCoversDialog = false }) { Text("取消") }
+                TextButton(onClick = { showClearCoversDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("设置") }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }) }) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -103,14 +113,14 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SectionCard(title = "阅读", icon = Icons.Outlined.Style) {
-                Text("默认阅读模式", style = MaterialTheme.typography.bodyMedium)
+            SectionCard(title = stringResource(R.string.section_reading), icon = Icons.Outlined.Style) {
+                Text(stringResource(R.string.default_reading_mode), style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
-                        ReadingMode.PAGED to "左右翻页",
-                        ReadingMode.CONTINUOUS to "上下翻页",
-                        ReadingMode.WEBTOON to "条带滚动"
+                        ReadingMode.PAGED to stringResource(R.string.mode_paged),
+                        ReadingMode.CONTINUOUS to stringResource(R.string.mode_continuous),
+                        ReadingMode.WEBTOON to stringResource(R.string.mode_webtoon)
                     ).forEach { (mode, label) ->
                         AssistChip(
                             onClick = { viewModel.setMode(mode) },
@@ -124,31 +134,31 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(12.dp))
                 ToggleRow(
-                    title = "保持屏幕常亮",
-                    subtitle = "阅读时禁止自动息屏",
+                    title = stringResource(R.string.keep_screen_on),
+                    subtitle = stringResource(R.string.keep_screen_on_summary),
                     checked = state.settings.keepScreenOn,
                     onChange = viewModel::setKeepScreenOn
                 )
             }
 
-            SectionCard(title = "封面", icon = Icons.Outlined.Image) {
+            SectionCard(title = stringResource(R.string.covers), icon = Icons.Outlined.Image) {
                 ToggleRow(
-                    title = "显示封面",
-                    subtitle = "在漫画库中显示封面缩略图，关闭后显示默认图标",
+                    title = stringResource(R.string.show_covers),
+                    subtitle = stringResource(R.string.show_covers_summary),
                     checked = state.settings.showCovers,
                     onChange = viewModel::setShowCovers
                 )
                 Spacer(Modifier.height(12.dp))
                 ToggleRow(
-                    title = "扫描时索引封面",
-                    subtitle = "扫描文件源时自动生成封面缩略图，关闭后扫描将跳过封面生成（更快）",
+                    title = stringResource(R.string.index_covers),
+                    subtitle = stringResource(R.string.index_covers_summary),
                     checked = state.settings.indexCoverOnScan,
                     onChange = viewModel::setIndexCoverOnScan
                 )
             }
 
             SectionCard(
-                title = "存储",
+                title = stringResource(R.string.section_storage),
                 icon = Icons.Outlined.CleaningServices,
                 action = {
                     IconButton(
@@ -161,12 +171,12 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         } else {
-                            Icon(Icons.Outlined.Refresh, contentDescription = "刷新占用")
+                            Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.refresh))
                         }
                     }
                 }
             ) {
-                Text("缓存：${state.cacheSize}", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.cache_size, state.cacheSize), style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { showClearDialog = true },
@@ -187,10 +197,10 @@ fun SettingsScreen(
                         Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text(if (state.isClearing) "清理中..." else "清除所有缓存")
+                    Text(if (state.isClearing) stringResource(R.string.cleaning) else stringResource(R.string.clear_all_cache))
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("封面：${state.coverSize}", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.covers_label) + state.coverSize, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { showClearCoversDialog = true },
@@ -211,42 +221,99 @@ fun SettingsScreen(
                         Icon(Icons.Outlined.Delete, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text(if (state.isClearingCovers) "清理中..." else "清除所有封面")
+                    Text(if (state.isClearingCovers) stringResource(R.string.cleaning) else stringResource(R.string.clear_all_covers))
                 }
             }
 
-            SectionCard(title = "主题", icon = Icons.Outlined.Brightness6) {
+            SectionCard(title = stringResource(R.string.section_theme), icon = Icons.Outlined.Brightness6) {
                 ToggleRow(
-                    title = "跟随系统主题",
-                    subtitle = "自动根据系统设置切换深浅色模式",
+                    title = stringResource(R.string.follow_system_theme),
+                    subtitle = stringResource(R.string.follow_system_theme_summary),
                     checked = state.settings.followSystemTheme,
                     onChange = viewModel::setFollowSystemTheme
                 )
                 ToggleRow(
-                    title = "深色模式",
-                    subtitle = "手动启用深色模式",
+                    title = stringResource(R.string.dark_mode),
+                    subtitle = stringResource(R.string.dark_mode_summary),
                     checked = state.settings.darkMode,
                     enabled = !state.settings.followSystemTheme,
                     onChange = viewModel::setDarkMode
                 )
                 ToggleRow(
-                    title = "动态主题色",
+                    title = stringResource(R.string.dynamic_theme_color),
                     subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                        "使用系统壁纸颜色作为主题色（Android 12+）"
+                        stringResource(R.string.dynamic_theme_color_summary)
                     else
-                        "需要 Android 12 及以上版本",
+                        stringResource(R.string.dynamic_theme_color_summary),
                     checked = state.settings.dynamicColor,
                     onChange = viewModel::setDynamicColor
                 )
             }
 
-            SectionCard(title = "隐私", icon = Icons.Outlined.VisibilityOff) {
+            SectionCard(title = stringResource(R.string.section_privacy), icon = Icons.Outlined.VisibilityOff) {
                 ToggleRow(
-                    title = "隐藏最近任务预览图",
-                    subtitle = "在系统多任务列表中隐藏应用内容预览（同时禁止应用内截图）",
+                    title = stringResource(R.string.hide_task_preview),
+                    subtitle = stringResource(R.string.hide_task_preview_summary),
                     checked = state.settings.hideFromRecents,
                     onChange = viewModel::setHideFromRecents
                 )
+            }
+
+            @Suppress("ComposeLocalActivityCast")
+            val activity = LocalContext.current as? ComponentActivity
+            LanguageCard(
+                current = state.settings.language,
+                onSelect = { code ->
+                    viewModel.setLanguage(code)
+                    activity?.recreate()
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LanguageCard(current: String, onSelect: (String) -> Unit) {
+    val options = listOf(
+        LocaleHelper.LANG_ZH_CN to stringResource(R.string.language_zh_cn),
+        LocaleHelper.LANG_EN_US to stringResource(R.string.language_en_us),
+        LocaleHelper.LANG_JA_JP to stringResource(R.string.language_ja_jp)
+    )
+    var expanded by remember { mutableStateOf(false) }
+    SectionCard(title = stringResource(R.string.section_language), icon = Icons.Outlined.Language) {
+        Text(stringResource(R.string.language_summary), style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it }
+        ) {
+            val selectedLabel = options.firstOrNull { it.first == current }?.second ?: current
+            OutlinedTextField(
+                value = selectedLabel,
+                onValueChange = {},
+                readOnly = true,
+                singleLine = true,
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth(),
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                options.forEach { (code, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            expanded = false
+                            if (code != current) onSelect(code)
+                        },
+                        contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                    )
+                }
             }
         }
     }

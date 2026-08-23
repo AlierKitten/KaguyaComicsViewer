@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.work
 
+import com.kaguya.comicsviewer.R
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -33,7 +34,7 @@ class ComicNotifications @Inject constructor(
         }
         val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("加载：$title")
+            .setContentTitle(context.getString(R.string.notify_loading_title, title))
             .setContentText(text)
             .setProgress(100, progress.coerceIn(0, 100), totalBytes <= 0)
             .setOnlyAlertOnce(true)
@@ -54,8 +55,8 @@ class ComicNotifications @Inject constructor(
         )
         val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("已就绪：$title")
-            .setContentText("点击即可开始阅读")
+            .setContentTitle(context.getString(R.string.notify_ready_title, title))
+            .setContentText(context.getString(R.string.notify_ready_text))
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
@@ -66,8 +67,8 @@ class ComicNotifications @Inject constructor(
         val nm: NotificationManager = context.getSystemService() ?: return
         val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_DOWNLOAD)
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle("加载失败：$title")
-            .setContentText(error?.take(120) ?: "未知错误")
+            .setContentTitle(context.getString(R.string.notify_failed_title, title))
+            .setContentText(error?.take(120) ?: context.getString(R.string.unknown_error))
             .setAutoCancel(true)
             .build()
         nm.notify(notificationId(comicId), notification)

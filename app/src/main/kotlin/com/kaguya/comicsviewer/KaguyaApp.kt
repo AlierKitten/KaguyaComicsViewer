@@ -1,12 +1,14 @@
 package com.kaguya.comicsviewer
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import coil.ImageLoader
 import com.kaguya.comicsviewer.notification.NotificationChannels
 import com.kaguya.comicsviewer.ui.reader.ArchiveFetcher
+import com.kaguya.comicsviewer.util.LocaleHelper
 import com.tencent.mmkv.MMKV
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -27,6 +29,10 @@ class KaguyaApp : Application(), Configuration.Provider {
 
     /** 应用级后台协程作用域（进程级生命周期）。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(LocaleHelper.applyLocale(base, LocaleHelper.readStoredLanguage()))
+    }
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
@@ -79,6 +85,13 @@ class KaguyaApp : Application(), Configuration.Provider {
         Log.d("KaguyaApp", "App onCreate started")
         val mmkvDir = MMKV.initialize(this)
         Log.d("KaguyaApp", "MMKV initialized, dir=$mmkvDir")
+
+        // 首次启动：若未设置语言，则按系统语言写入默认（未适配则英语）
+        val mmkv = MMKV.defaultMMKV()
+        if (mmkv.decodeString("language").isNullOrEmpty()) {
+            mmkv.encode("language", LocaleHelper.resolveSystemLanguage())
+        }
+
         notificationChannels.ensureCreated()
         Log.d("KaguyaApp", "Notification channels created")
 

@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.sources
 
+import com.kaguya.comicsviewer.R
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,6 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -88,7 +90,9 @@ fun SourcesScreen(
 
     // Toast 事件监听
     LaunchedEffect(Unit) {
-        viewModel.toastEvents.collect { msg ->
+        viewModel.toastEvents.collect { event ->
+            val msg = if (event.args.isEmpty()) context.getString(event.resId)
+            else context.getString(event.resId, *event.args)
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
@@ -109,7 +113,7 @@ fun SourcesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("文件源") },
+                title = { Text(stringResource(R.string.sources_title)) },
                 actions = {
                     if (isIndexing) {
                         IconButton(
@@ -119,12 +123,12 @@ fun SourcesScreen(
                             if (stopping) {
                                 CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                             } else {
-                                Icon(Icons.Outlined.Stop, contentDescription = "停止索引")
+                                Icon(Icons.Outlined.Stop, contentDescription = stringResource(R.string.stop_indexing))
                             }
                         }
                     } else {
                         IconButton(onClick = { viewModel.scanAllEnabled() }) {
-                            Icon(Icons.Outlined.Refresh, contentDescription = "全部刷新")
+                            Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.refresh_all))
                         }
                     }
                 }
@@ -134,16 +138,16 @@ fun SourcesScreen(
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExtendedFloatingActionButton(
                     onClick = {
-                        pendingLocalName = "本地 ${sources.size + 1}"
+                        pendingLocalName = context.getString(R.string.source_type_local) + " ${sources.size + 1}"
                         localPicker.launch(null)
                     },
-                    text = { Text("本地") },
+                    text = { Text(stringResource(R.string.source_type_local)) },
                     icon = { Icon(Icons.Outlined.FolderOpen, null) },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 )
                 ExtendedFloatingActionButton(
                     onClick = { showSmb = true },
-                    text = { Text("SMB") },
+                    text = { Text(stringResource(R.string.source_type_smb)) },
                     icon = { Icon(Icons.Outlined.Cloud, null) }
                 )
             }
@@ -154,9 +158,9 @@ fun SourcesScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Outlined.Storage, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(12.dp))
-                    Text("没有文件源", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.empty_sources), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
-                    Text("点击右下角 + 添加本地或 SMB 源", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.add_source_hint), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else {
@@ -226,27 +230,27 @@ private fun SourceItem(
             Column(Modifier.weight(1f)) {
                 Text(row.source.name, style = MaterialTheme.typography.titleMedium)
                 val sub = when (row.source.type) {
-                    ComicSourceType.LOCAL -> "本地 · ${row.lastScanned}"
+                    ComicSourceType.LOCAL -> stringResource(R.string.local_source_sub, row.lastScanned)
                     ComicSourceType.SMB -> {
                         val host = row.source.host.orEmpty()
                         val share = row.source.share.orEmpty()
-                        "SMB $host/$share · ${row.lastScanned}"
+                        stringResource(R.string.smb_source_sub, host, share, row.lastScanned)
                     }
                 }
                 Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    "${row.comicCount} 个漫画",
+                    stringResource(R.string.scanned_comics_count, row.comicCount),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )
                 // 落库索引状态徽标：直观区分「真完成」与「未完成/失败」（进程被杀后也能恢复显示）
                 val statusLabel = when (row.source.indexStatus) {
                     com.kaguya.comicsviewer.domain.model.IndexStatus.DONE ->
-                        "已索引 ${row.source.indexCurrent}/${row.source.indexTotal}" to MaterialTheme.colorScheme.primary
+                        stringResource(R.string.indexed_status, row.source.indexCurrent, row.source.indexTotal) to MaterialTheme.colorScheme.primary
                     com.kaguya.comicsviewer.domain.model.IndexStatus.FAILED ->
-                        "索引失败" to MaterialTheme.colorScheme.error
+                        stringResource(R.string.index_failed) to MaterialTheme.colorScheme.error
                     com.kaguya.comicsviewer.domain.model.IndexStatus.CANCELLED ->
-                        "已取消" to MaterialTheme.colorScheme.onSurfaceVariant
+                        stringResource(R.string.index_cancelled) to MaterialTheme.colorScheme.onSurfaceVariant
                     else -> null
                 }
                 if (statusLabel != null) {
@@ -277,12 +281,12 @@ private fun RenameSourceDialog(
     var name by remember { mutableStateOf(currentName) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名文件源") },
+        title = { Text(stringResource(R.string.rename_source)) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("名称") },
+                label = { Text(stringResource(R.string.source_name)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -291,9 +295,9 @@ private fun RenameSourceDialog(
             TextButton(
                 enabled = name.trim().isNotBlank() && name.trim() != currentName,
                 onClick = { onConfirm(name) }
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }
 
@@ -303,6 +307,7 @@ private fun SmbDialog(
     onDismiss: () -> Unit,
     onConfirm: (String, String, String, String?, String?, String?, String?) -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var host by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("445") }
@@ -318,6 +323,7 @@ private fun SmbDialog(
     var dirEntries by remember { mutableStateOf<List<SmbClient.DirEntry>>(emptyList()) }
 
     var statusMsg by remember { mutableStateOf<String?>(null) }
+    var statusIsError by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -337,7 +343,7 @@ private fun SmbDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加 SMB 源") },
+        title = { Text(stringResource(R.string.add_smb_title)) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -346,28 +352,28 @@ private fun SmbDialog(
                 // === 连接信息 ===
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text("名称") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                    label = { Text(stringResource(R.string.source_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = host, onValueChange = { host = it; connected = false },
-                    label = { Text("主机 *") }, placeholder = { Text("192.168.1.10") },
+                    label = { Text(stringResource(R.string.source_host_required)) }, placeholder = { Text("192.168.1.10") },
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5); connected = false },
-                    label = { Text("端口") }, placeholder = { Text("445") },
+                    label = { Text(stringResource(R.string.source_port)) }, placeholder = { Text("445") },
                     singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = user, onValueChange = { user = it; connected = false },
-                    label = { Text("用户名 *") }, singleLine = true,
+                    label = { Text(stringResource(R.string.source_username_required)) }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = pass, onValueChange = { pass = it; connected = false },
-                    label = { Text("密码") }, placeholder = { Text("留空表示无密码") },
+                    label = { Text(stringResource(R.string.source_password)) }, placeholder = { Text(stringResource(R.string.password_optional)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -390,15 +396,17 @@ private fun SmbDialog(
 
                             val result = smbClient.testConnection(host, portNum, user, pass)
                             if (result.isSuccess) {
-                                statusMsg = "连接成功"
+                                statusIsError = false
+                                statusMsg = context.getString(R.string.connection_success)
                                 val sharesResult = smbClient.listShares(host, portNum, user, pass)
                                 shares = sharesResult.getOrDefault(emptyList())
                                 connected = true
                                 if (shares.isEmpty()) {
-                                    statusMsg = "连接成功，但未发现共享。请手动输入共享名。"
+                                    statusMsg = context.getString(R.string.connection_no_shares)
                                 }
                             } else {
-                                statusMsg = "连接失败：${result.exceptionOrNull()?.message}"
+                                statusIsError = true
+                                statusMsg = context.getString(R.string.connection_failed, result.exceptionOrNull()?.message ?: "")
                             }
                             isLoading = false
                         }
@@ -410,14 +418,14 @@ private fun SmbDialog(
                         CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text(if (isLoading && !connected) "连接中..." else "连接并获取路径")
+                    Text(if (isLoading && !connected) stringResource(R.string.connection_testing) else stringResource(R.string.connect_and_list))
                 }
 
                 statusMsg?.let { msg ->
                     Text(
                         msg,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (msg.contains("失败") || msg.contains("未发现")) MaterialTheme.colorScheme.error
+                        color = if (statusIsError) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.primary
                     )
                 }
@@ -428,7 +436,7 @@ private fun SmbDialog(
 
                     // 共享名选择
                     if (shares.isNotEmpty()) {
-                        Text("选择共享", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.select_share), style = MaterialTheme.typography.labelMedium)
                         LazyColumn(modifier = Modifier.heightIn(max = 150.dp)) {
                             items(shares) { shareName ->
                                 val selected = share == shareName
@@ -462,7 +470,7 @@ private fun SmbDialog(
                     if (shares.isEmpty()) {
                         OutlinedTextField(
                             value = share, onValueChange = { share = it },
-                            label = { Text("共享名 *") }, singleLine = true,
+                            label = { Text(stringResource(R.string.source_share_required)) }, singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Button(
@@ -472,7 +480,7 @@ private fun SmbDialog(
                             },
                             enabled = share.isNotBlank() && !isLoading,
                             modifier = Modifier.fillMaxWidth()
-                        ) { Text("浏览") }
+                        ) { Text(stringResource(R.string.browse)) }
                     }
 
                     // 目录浏览器（当选中共享后显示）
@@ -516,7 +524,7 @@ private fun SmbDialog(
                                 tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                "使用当前目录",
+                                stringResource(R.string.use_current_dir),
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
@@ -527,7 +535,7 @@ private fun SmbDialog(
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
                                 CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("加载中...", style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.loading), style = MaterialTheme.typography.bodySmall)
                             }
                         } else if (dirEntries.isNotEmpty()) {
                             LazyColumn(modifier = Modifier.heightIn(max = 150.dp)) {
@@ -557,7 +565,7 @@ private fun SmbDialog(
                             }
                         } else if (!isLoading) {
                             Text(
-                                "（此目录为空）",
+                                stringResource(R.string.dir_empty),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -578,8 +586,8 @@ private fun SmbDialog(
                         user.ifBlank { null }, pass.ifBlank { null }, null
                     )
                 }
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }

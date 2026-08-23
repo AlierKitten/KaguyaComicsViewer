@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.library
 
+import com.kaguya.comicsviewer.R
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,7 +109,9 @@ fun LibraryScreen(
 
     // Toast 事件监听
     LaunchedEffect(Unit) {
-        viewModel.toastEvents.collect { msg ->
+        viewModel.toastEvents.collect { event ->
+            val msg = if (event.args.isEmpty()) context.getString(event.resId)
+            else context.getString(event.resId, *event.args)
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
@@ -139,19 +143,19 @@ fun LibraryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("漫画库") },
+                title = { Text(stringResource(R.string.tab_library)) },
                 actions = {
                     IconButton(onClick = { showSortMenu = true }) {
-                        Icon(Icons.Outlined.SortByAlpha, contentDescription = "排序")
+                        Icon(Icons.Outlined.SortByAlpha, contentDescription = stringResource(R.string.sort))
                     }
                     DropdownMenu(
                         expanded = showSortMenu,
                         onDismissRequest = { showSortMenu = false }
                     ) {
                         val fieldLabel = mapOf(
-                            ComicSortField.NAME to "名称",
-                            ComicSortField.SIZE to "大小",
-                            ComicSortField.DATE to "日期"
+                            ComicSortField.NAME to stringResource(R.string.sort_name),
+                            ComicSortField.SIZE to stringResource(R.string.sort_size),
+                            ComicSortField.DATE to stringResource(R.string.sort_date)
                         )
                         ComicSortField.entries.forEach { field ->
                             DropdownMenuItem(
@@ -177,12 +181,12 @@ fun LibraryScreen(
                     IconButton(onClick = { viewModel.toggleDisplayMode() }) {
                         Icon(
                             if (state.displayMode == LibraryDisplayMode.GRID) Icons.Outlined.ViewList else Icons.Outlined.ViewAgenda,
-                            contentDescription = "切换视图"
+                            contentDescription = stringResource(R.string.toggle_view)
                         )
                     }
                     IconButton(onClick = { viewModel.scanAll() }) {
                         if (state.isScanning) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                        else Icon(Icons.Outlined.Refresh, contentDescription = "扫描")
+                        else Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.scan))
                     }
                 }
             )
@@ -204,7 +208,7 @@ fun LibraryScreen(
                         }
                     }
                 },
-                placeholder = { Text("搜索漫画") }
+                placeholder = { Text(stringResource(R.string.search_comics)) }
             )
 
             if (state.comics.isEmpty() && state.recent.isEmpty()) {
@@ -277,11 +281,11 @@ fun LoadingDialog(
     onCancel: () -> Unit = {}
 ) {
     val stateText = when (progress.state) {
-        CacheState.PENDING -> "准备加载..."
-        CacheState.DOWNLOADING, CacheState.EXTRACTING -> "正在加载..."
-        CacheState.DOWNLOADED -> "正在解压..."
-        CacheState.READY -> "加载完成！"
-        CacheState.FAILED -> "加载失败"
+        CacheState.PENDING -> stringResource(R.string.loading_title_pending)
+        CacheState.DOWNLOADING, CacheState.EXTRACTING -> stringResource(R.string.loading_title_loading)
+        CacheState.DOWNLOADED -> stringResource(R.string.loading_title_extracting)
+        CacheState.READY -> stringResource(R.string.loading_title_done)
+        CacheState.FAILED -> stringResource(R.string.loading_title_failed)
     }
 
     val showProgress = progress.totalBytes > 0 && progress.state != CacheState.FAILED && progress.state != CacheState.READY
@@ -320,16 +324,16 @@ fun LoadingDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("请稍候...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.please_wait), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         },
         confirmButton = {
             if (progress.state == CacheState.FAILED || progress.state == CacheState.READY) {
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
             } else {
-                TextButton(onClick = onDismiss) { Text("后台加载") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.background_loading)) }
             }
         },
         dismissButton = {
@@ -337,7 +341,7 @@ fun LoadingDialog(
                 TextButton(onClick = {
                     onCancel()
                     onDismiss()
-                }) { Text("取消加载", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.cancel_loading), color = MaterialTheme.colorScheme.error) }
             }
         }
     )
@@ -349,9 +353,9 @@ private fun EmptyLibrary() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.AutoStories, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
-            Text("还没有漫画", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.empty_library), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
-            Text("去文件源页面添加一个本地或 SMB 源", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.add_source_hint), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -426,7 +430,7 @@ private fun ComicGridItem(row: ComicRow, showCover: Boolean, onClick: () -> Unit
                     )
                     if (row.isFinished) {
                         Text(
-                            "已读完",
+                            stringResource(R.string.finished),
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF4CAF50),
                             fontWeight = FontWeight.Medium
@@ -499,7 +503,7 @@ private fun ComicListItem(row: ComicRow, showCover: Boolean, onClick: () -> Unit
                     )
                     if (row.isFinished) {
                         Text(
-                            "已读完",
+                            stringResource(R.string.finished),
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF4CAF50),
                             fontWeight = FontWeight.Medium
@@ -510,11 +514,11 @@ private fun ComicListItem(row: ComicRow, showCover: Boolean, onClick: () -> Unit
                     when (cache.state) {
                         CacheState.DOWNLOADING, CacheState.EXTRACTING -> {
                             Spacer(Modifier.height(4.dp))
-                            Text("加载中...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(stringResource(R.string.cache_loading), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                         CacheState.PENDING -> {
                             Spacer(Modifier.height(4.dp))
-                            Text("待加载", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.cache_waiting), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         else -> Unit
                     }

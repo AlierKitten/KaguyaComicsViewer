@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.work
 
+import com.kaguya.comicsviewer.R
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -33,36 +34,22 @@ class IndexKeepAliveService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun buildNotification(): Notification = buildNotification(progress = null)
-
-    private fun buildNotification(progress: ProgressInfo?): Notification {
+    private fun buildNotification(): Notification {
         val pi = PendingIntent.getActivity(
             this,
             NOTIFY_ID,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val builder = NotificationCompat.Builder(this, NotificationChannels.CHANNEL_GENERAL)
+        return NotificationCompat.Builder(this, NotificationChannels.CHANNEL_GENERAL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("正在后台索引漫画库")
+            .setContentTitle(getString(R.string.notify_indexing_title))
+            .setContentText(getString(R.string.notify_indexing_scanning))
             .setOngoing(true)
             .setContentIntent(pi)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-
-        if (progress == null) {
-            builder.setContentText("扫描文件源中，可切换到其他页面或退出应用，完成后将通知您")
-        } else {
-            val pct = if (progress.total > 0) {
-                (progress.current * 100 / progress.total).coerceIn(0, 100)
-            } else 0
-            builder
-                .setContentText("正在索引漫画库，已完成 $pct%")
-                .setProgress(100, pct, false)
-        }
-        return builder.build()
+            .build()
     }
-
-    private data class ProgressInfo(val current: Int, val total: Int)
 
     companion object {
         const val NOTIFY_ID = 5001
@@ -90,8 +77,8 @@ class IndexKeepAliveService : Service() {
             )
             val notification = NotificationCompat.Builder(context, NotificationChannels.CHANNEL_GENERAL)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setContentTitle("正在后台索引漫画库")
-                .setContentText("正在索引漫画库，已完成 $pct%")
+                .setContentTitle(context.getString(R.string.notify_indexing_title))
+                .setContentText(context.getString(R.string.notify_indexing_progress, pct))
                 .setProgress(100, pct, false)
                 .setOngoing(true)
                 .setContentIntent(pi)
@@ -99,7 +86,7 @@ class IndexKeepAliveService : Service() {
                 .build()
             try {
                 manager.notify(NOTIFY_ID, notification)
-            } catch (e: SecurityException) {
+            } catch (_: SecurityException) {
                 // 无 POST_NOTIFICATIONS 权限时忽略，不影响后台索引
             }
         }

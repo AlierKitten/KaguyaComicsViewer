@@ -27,6 +27,7 @@ import com.kaguya.comicsviewer.ui.KaguyaApp
 import com.kaguya.comicsviewer.ui.theme.KaguyaTheme
 import com.kaguya.comicsviewer.ui.theme.LocalSpacing
 import com.kaguya.comicsviewer.ui.theme.Spacing
+import com.kaguya.comicsviewer.util.LocaleHelper
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -35,6 +36,10 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
+
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(LocaleHelper.applyLocale(newBase, LocaleHelper.readStoredLanguage()))
+    }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()

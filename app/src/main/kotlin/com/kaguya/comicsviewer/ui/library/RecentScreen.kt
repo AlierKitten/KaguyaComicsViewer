@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.library
 
+import com.kaguya.comicsviewer.R
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +54,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.kaguya.comicsviewer.domain.model.CacheState
 import com.kaguya.comicsviewer.ui.components.AdaptiveScrollbar
+import com.kaguya.comicsviewer.util.ToastEvent
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -76,7 +79,9 @@ fun RecentScreen(
     }
 
     LaunchedEffect(Unit) {
-        viewModel.toastEvents.collect { msg ->
+        viewModel.toastEvents.collect { event: ToastEvent ->
+            val msg = if (event.args.isEmpty()) context.getString(event.resId)
+            else context.getString(event.resId, *event.args)
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
@@ -107,10 +112,10 @@ fun RecentScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("继续阅读") },
+                title = { Text(stringResource(R.string.tab_recent)) },
                 actions = {
                     IconButton(onClick = { viewModel.clearProgress() }) {
-                        Icon(Icons.Outlined.CleaningServices, contentDescription = "清除阅读记录")
+                        Icon(Icons.Outlined.CleaningServices, contentDescription = stringResource(R.string.clear_history))
                     }
                 }
             )
@@ -129,10 +134,10 @@ fun RecentScreen(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text("没有阅读记录", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.empty_recent), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "开始阅读或加载漫画后这里会显示进度",
+                        stringResource(R.string.empty_recent_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -235,14 +240,14 @@ private fun RecentListItem(
                 Spacer(Modifier.height(4.dp))
                 if (row.isFinished) {
                     Text(
-                        "已读完",
+                        stringResource(R.string.finished),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF4CAF50),
                         fontWeight = FontWeight.Medium
                     )
                 } else {
                     Text(
-                        "已读 ${row.progress + 1} / ${row.comic.pageCount.takeIf { it > 0 } ?: "?"} 页",
+                        stringResource(R.string.read_progress, row.progress + 1, row.comic.pageCount.takeIf { it > 0 } ?: "?"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -265,32 +270,32 @@ private fun RecentListItem(
                     Spacer(Modifier.height(4.dp))
                     when (cache.state) {
                         CacheState.READY -> Text(
-                            "已就绪",
+                            stringResource(R.string.state_ready),
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF4CAF50)
                         )
                         CacheState.DOWNLOADING -> Text(
-                            "下载中 ${if (cache.totalBytes > 0) "${((cache.downloadedBytes * 100) / cache.totalBytes).toInt()}%" else "..."}",
+                            stringResource(R.string.state_downloading, if (cache.totalBytes > 0) "${((cache.downloadedBytes * 100) / cache.totalBytes).toInt()}%" else "..."),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                         CacheState.EXTRACTING -> Text(
-                            "解压中...",
+                            stringResource(R.string.state_extracting),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                         CacheState.DOWNLOADED -> Text(
-                            "已下载，待解压",
+                            stringResource(R.string.state_downloaded),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                         CacheState.PENDING -> Text(
-                            "等待加载",
+                            stringResource(R.string.state_pending),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         CacheState.FAILED -> Text(
-                            "加载失败",
+                            stringResource(R.string.state_failed),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -312,7 +317,7 @@ private fun RecentListItem(
             IconButton(onClick = onClear) {
                 Icon(
                     Icons.Outlined.CleaningServices,
-                    contentDescription = "清除阅读记录",
+                    contentDescription = stringResource(R.string.clear_history),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -320,7 +325,7 @@ private fun RecentListItem(
                 IconButton(onClick = onCancel) {
                     Icon(
                         Icons.Outlined.Cancel,
-                        contentDescription = "取消加载",
+                        contentDescription = stringResource(R.string.cancel_loading),
                         tint = MaterialTheme.colorScheme.error
                     )
                 }

@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KaguyaCV</string>
+    <string name="tab_library">漫画库</string>
+    <string name="tab_recent">继续阅读</string>
+    <string name="tab_sources">文件源</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="empty_library">还没有漫画，去添加一个文件源吧</string>
+    <string name="empty_sources">没有可用的文件源</string>
+    <string name="add_source">添加文件源</string>
+    <string name="add_local_source">选择本地文件夹</string>
+    <string name="add_smb_source">添加 SMB 远程源</string>
+    <string name="scan_now">立即扫描</string>
+    <string name="scanning">扫描中…</string>
+    <string name="last_scan">上次扫描：%1$s</string>
+    <string name="never_scanned">尚未扫描</string>
+
+    <string name="source_name">名称</string>
+    <string name="source_host">主机</string>
+    <string name="source_host_required">主机 *</string>
+    <string name="source_share">共享名</string>
+    <string name="source_share_required">共享名 *</string>
+    <string name="source_path">路径</string>
+    <string name="source_username">用户名</string>
+    <string name="source_username_required">用户名 *</string>
+    <string name="source_password">密码</string>
+    <string name="source_domain">域（可选）</string>
+    <string name="source_port">端口</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+    <string name="test_connection">测试连接</string>
+
+    <string name="downloading">下载中</string>
+    <string name="extracting">解压中</string>
+    <string name="ready_to_read">可阅读</string>
+    <string name="pending">待处理</string>
+    <string name="failed">失败</string>
+    <string name="retry">重试</string>
+    <string name="cancel_download">取消下载</string>
+    <string name="clear_cache">清理缓存</string>
+    <string name="clear_cache_comic">清理此漫画缓存</string>
+    <string name="continue_reading">继续阅读</string>
+    <string name="recent">最近阅读</string>
+    <string name="all">全部</string>
+
+    <string name="page_indicator">第 %1$d / %2$d 页</string>
+    <string name="reading_mode">阅读模式</string>
+    <string name="mode_paged">左右翻页</string>
+    <string name="mode_continuous">上下滚动</string>
+    <string name="mode_webtoon">条带滚动</string>
+
+    <string name="permission_required">需要通知权限以显示下载进度</string>
+    <string name="ok">确定</string>
+
+    <string name="cache_size">缓存：%1$s</string>
+    <string name="free_space">剩余空间：%1$s</string>
+
+    <!-- Library / Recent -->
+    <string name="sort">排序</string>
+    <string name="toggle_view">切换视图</string>
+    <string name="scan">扫描</string>
+    <string name="refresh">刷新</string>
+    <string name="clear">清空</string>
+    <string name="search_comics">搜索漫画</string>
+    <string name="sort_name">名称</string>
+    <string name="sort_size">大小</string>
+    <string name="sort_date">日期</string>
+    <string name="empty_recent">没有阅读记录</string>
+    <string name="empty_recent_hint">开始阅读或加载漫画后这里会显示进度</string>
+    <string name="clear_history">清除阅读记录</string>
+    <string name="finished">已读完</string>
+    <string name="read_progress">已读 %1$d / %2$s 页</string>
+    <string name="state_ready">已就绪</string>
+    <string name="state_downloading">下载中 %1$s</string>
+    <string name="state_extracting">解压中…</string>
+    <string name="state_downloaded">已下载，待解压</string>
+    <string name="state_pending">等待加载</string>
+    <string name="state_failed">加载失败</string>
+    <string name="cache_loading">加载中…</string>
+    <string name="cache_waiting">待加载</string>
+    <string name="loading_title_pending">准备加载…</string>
+    <string name="loading_title_loading">正在加载…</string>
+    <string name="loading_title_extracting">正在解压…</string>
+    <string name="loading_title_done">加载完成！</string>
+    <string name="loading_title_failed">加载失败</string>
+    <string name="please_wait">请稍候…</string>
+    <string name="close">关闭</string>
+    <string name="background_loading">后台加载</string>
+    <string name="cancel_loading">取消加载</string>
+    <string name="add_source_hint">去文件源页面添加一个本地或 SMB 源</string>
+    <string name="unknown_error">未知错误</string>
+
+    <!-- Sources -->
+    <string name="sources_title">文件源</string>
+    <string name="add_source_title">添加文件源</string>
+    <string name="source_type_local">本地</string>
+    <string name="source_type_smb">SMB</string>
+    <string name="source_display_name">文件源</string>
+    <string name="rename">重命名</string>
+    <string name="rename_source">重命名文件源</string>
+    <string name="source_type">类型</string>
+    <string name="local_folder">本地文件夹</string>
+    <string name="smb_remote">SMB 远程</string>
+    <string name="add_smb_title">添加 SMB 源</string>
+    <string name="port_optional">端口（可选）</string>
+    <string name="connect_and_list">连接并获取路径</string>
+    <string name="use_current_dir">使用当前目录</string>
+    <string name="loading">加载中…</string>
+    <string name="connection_idle">填写主机、共享名和凭据后测试连接</string>
+    <string name="connection_testing">正在测试连接…</string>
+    <string name="connection_success">连接成功</string>
+    <string name="connection_failed">连接失败：%1$s</string>
+    <string name="field_required">%1$s 为必填项</string>
+    <string name="source_exists">已存在同名文件源</string>
+    <string name="source_saved">文件源已保存</string>
+    <string name="source_save_failed">保存文件源失败：%1$s</string>
+    <string name="source_deleted">文件源已删除</string>
+    <string name="source_rename_empty">名称不能为空</string>
+    <string name="stop_indexing">停止索引</string>
+    <string name="refresh_all">全部刷新</string>
+    <string name="indexed_status">已索引 %1$d/%2$d</string>
+    <string name="index_failed">索引失败</string>
+    <string name="index_cancelled">已取消</string>
+    <string name="connection_no_shares">连接成功，但未发现共享。请手动输入共享名。</string>
+    <string name="browse">浏览</string>
+    <string name="select_share">选择共享</string>
+    <string name="dir_empty">（此目录为空）</string>
+    <string name="password_optional">留空表示无密码</string>
+    <string name="local_source_sub">本地 · %1$s</string>
+    <string name="smb_source_sub">SMB %1$s/%2$s · %3$s</string>
+    <string name="scanned_comics_count">已扫描 %1$d 部漫画</string>
+    <string name="empty_source_comics">该文件源暂无漫画</string>
+
+    <!-- Settings -->
+    <string name="settings_title">设置</string>
+    <string name="section_reading">阅读</string>
+    <string name="default_reading_mode">默认阅读模式</string>
+    <string name="keep_screen_on">保持屏幕常亮</string>
+    <string name="keep_screen_on_summary">阅读时防止屏幕熄灭</string>
+    <string name="covers">封面</string>
+    <string name="show_covers">显示封面</string>
+    <string name="show_covers_summary">显示漫画封面缩略图</string>
+    <string name="index_covers">扫描时索引封面</string>
+    <string name="index_covers_summary">扫描文件源时生成封面缩略图</string>
+    <string name="section_storage">存储</string>
+    <string name="cache_label">缓存：</string>
+    <string name="covers_label">封面：</string>
+    <string name="cleaning">清理中…</string>
+    <string name="clear_all_cache">清除所有缓存</string>
+    <string name="clear_all_covers">清除所有封面</string>
+    <string name="clear_cache_confirm">将删除所有已加载的漫画缓存文件，需要重新加载才能阅读。确定继续？</string>
+    <string name="clear_covers_confirm">将删除所有漫画的封面缩略图，刷新文件源后会重新生成。确定继续？</string>
+    <string name="section_theme">主题</string>
+    <string name="follow_system_theme">跟随系统主题</string>
+    <string name="follow_system_theme_summary">使用系统的浅色/深色模式</string>
+    <string name="dark_mode">深色模式</string>
+    <string name="dark_mode_summary">手动启用深色模式</string>
+    <string name="dynamic_theme_color">动态主题色</string>
+    <string name="dynamic_theme_color_summary">使用系统强调色（Android 12+）</string>
+    <string name="section_privacy">隐私</string>
+    <string name="hide_task_preview">隐藏最近任务预览图</string>
+    <string name="hide_task_preview_summary">在最近任务界面模糊或隐藏应用内容</string>
+    <string name="section_language">语言</string>
+    <string name="language_summary">选择应用显示语言</string>
+    <string name="language_zh_cn">简体中文</string>
+    <string name="language_en_us">英语（美国）</string>
+    <string name="language_ja_jp">日语</string>
+    <string name="toast_indexing_started">已在后台开始索引…</string>
+    <string name="toast_indexing_started_named">已在后台开始索引「%1$s」…</string>
+    <string name="toast_cover_cleared">封面已清理</string>
+    <string name="toast_cache_cleared">缓存已清理</string>
+    <string name="toast_no_source">请先添加文件源</string>
+    <string name="toast_permission_denied">权限被拒绝：%1$s</string>
+    <string name="toast_already_scanning">正在扫描中</string>
+    <string name="toast_scan_failed">扫描失败：%1$s</string>
+    <string name="toast_load_failed">加载失败：%1$s</string>
+
+    <!-- Reader -->
+    <string name="current_mode">当前模式：%1$s</string>
+    <string name="page_indicator_click">第 %1$d / %2$d 页（点击跳转）</string>
+    <string name="jump_title">跳转到第几页</string>
+    <string name="jump_total">共 %1$d 页</string>
+    <string name="jump">跳转</string>
+    <string name="load_failed">加载失败</string>
+    <string name="no_pages">未找到页面</string>
+    <string name="no_pages_hint">无法读取压缩包内容，可重试或返回漫画库</string>
+    <string name="back">返回</string>
+
+    <!-- Notifications -->
+    <string name="notify_indexing_title">正在后台索引漫画库</string>
+    <string name="notify_indexing_scanning">扫描文件源中，可切换到其他页面或退出应用，完成后将通知您</string>
+    <string name="notify_indexing_progress">正在索引漫画库，已完成 %1$d%%</string>
+    <string name="notify_loading_title">加载：%1$s</string>
+    <string name="notify_ready_title">已就绪：%1$s</string>
+    <string name="notify_ready_text">点击即可开始阅读</string>
+    <string name="notify_failed_title">加载失败：%1$s</string>
+</resources>

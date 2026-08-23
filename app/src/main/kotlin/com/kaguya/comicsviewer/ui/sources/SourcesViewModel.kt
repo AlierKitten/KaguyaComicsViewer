@@ -1,5 +1,6 @@
 package com.kaguya.comicsviewer.ui.sources
 
+import com.kaguya.comicsviewer.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaguya.comicsviewer.data.prefs.SettingsRepository
@@ -9,6 +10,7 @@ import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
 import com.kaguya.comicsviewer.domain.usecase.ScanSourceUseCase
 import com.kaguya.comicsviewer.util.FormatUtils
+import com.kaguya.comicsviewer.util.ToastEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -71,7 +73,7 @@ class SourcesViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _toastEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val _toastEvents = MutableSharedFlow<ToastEvent>(extraBufferCapacity = 1)
     val toastEvents = _toastEvents.asSharedFlow()
 
     fun addLocalSource(name: String, treeUri: String) {
@@ -142,13 +144,13 @@ class SourcesViewModel @Inject constructor(
      */
     fun scan(source: ComicSource) {
         scanUseCase.startScan(source)
-        _toastEvents.tryEmit("已在后台开始索引「${source.name}」")
+        _toastEvents.tryEmit(ToastEvent(R.string.toast_indexing_started_named, arrayOf(source.name)))
     }
 
     /** 在后台索引所有启用的源。 */
     fun scanAllEnabled() {
         scanUseCase.startScanAll()
-        _toastEvents.tryEmit("已在后台开始索引全部启用的文件源")
+        _toastEvents.tryEmit(ToastEvent(R.string.toast_indexing_started, emptyArray()))
     }
 
     /** 请求中止所有正在进行的后台索引。已写入数据库的漫画数据保留。 */

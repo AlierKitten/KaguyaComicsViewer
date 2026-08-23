@@ -57,8 +57,6 @@
     <string name="cache_size">Cache: %1$s</string>
     <string name="free_space">Free Space: %1$s</string>
 
-    <!-- ===== New strings added for i18n ===== -->
-
     <!-- Library / Recent -->
     <string name="sort">Sort</string>
     <string name="toggle_view">Toggle View</string>
