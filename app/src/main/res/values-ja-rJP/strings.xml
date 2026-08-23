@@ -47,9 +47,9 @@
 
     <string name="page_indicator">%1$d / %2$d ページ</string>
     <string name="reading_mode">読書モード</string>
-    <string name="mode_paged">ページ送り（左右）</string>
-    <string name="mode_continuous">連続スクロール（上下）</string>
-    <string name="mode_webtoon">ウェブトゥーン（ストリップ）</string>
+    <string name="mode_paged">めくり</string>
+    <string name="mode_continuous">スクロール</string>
+    <string name="mode_webtoon">ウェブトゥン</string>
 
     <string name="permission_required">ダウンロード進捗を表示するには通知権限が必要です</string>
     <string name="ok">OK</string>
@@ -164,9 +164,6 @@
     <string name="hide_task_preview_summary">最近のタスク画面でアプリの内容をぼかすか非表示にする</string>
     <string name="section_language">言語</string>
     <string name="language_summary">アプリの表示言語を選択</string>
-    <string name="language_zh_cn">中国語（簡体字）</string>
-    <string name="language_en_us">英語（米国）</string>
-    <string name="language_ja_jp">日本語</string>
     <string name="toast_indexing_started">バックグラウンドでインデックスを開始しました…</string>
     <string name="toast_indexing_started_named">バックグラウンドで「%1$s」のインデックスを開始しました…</string>
     <string name="toast_cover_cleared">封面をクリアしました</string>

@@ -164,9 +164,6 @@
     <string name="hide_task_preview_summary">在最近任务界面模糊或隐藏应用内容</string>
     <string name="section_language">语言</string>
     <string name="language_summary">选择应用显示语言</string>
-    <string name="language_zh_cn">简体中文</string>
-    <string name="language_en_us">英语（美国）</string>
-    <string name="language_ja_jp">日语</string>
     <string name="toast_indexing_started">已在后台开始索引…</string>
     <string name="toast_indexing_started_named">已在后台开始索引「%1$s」…</string>
     <string name="toast_cover_cleared">封面已清理</string>

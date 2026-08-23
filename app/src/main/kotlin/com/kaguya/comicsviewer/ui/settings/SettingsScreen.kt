@@ -276,9 +276,9 @@ fun SettingsScreen(
 @Composable
 private fun LanguageCard(current: String, onSelect: (String) -> Unit) {
     val options = listOf(
-        LocaleHelper.LANG_ZH_CN to stringResource(R.string.language_zh_cn),
-        LocaleHelper.LANG_EN_US to stringResource(R.string.language_en_us),
-        LocaleHelper.LANG_JA_JP to stringResource(R.string.language_ja_jp)
+        LocaleHelper.LANG_ZH_CN to "zh-CN",
+        LocaleHelper.LANG_EN_US to "en-US",
+        LocaleHelper.LANG_JA_JP to "ja-JP"
     )
     var expanded by remember { mutableStateOf(false) }
     SectionCard(title = stringResource(R.string.section_language), icon = Icons.Outlined.Language) {
@@ -288,7 +288,7 @@ private fun LanguageCard(current: String, onSelect: (String) -> Unit) {
             expanded = expanded,
             onExpandedChange = { expanded = it }
         ) {
-            val selectedLabel = options.firstOrNull { it.first == current }?.second ?: current
+            val selectedLabel = options.firstOrNull { it.first == current }?.second ?: current.uppercase()
             OutlinedTextField(
                 value = selectedLabel,
                 onValueChange = {},
