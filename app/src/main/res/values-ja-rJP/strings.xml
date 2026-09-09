@@ -170,6 +170,7 @@
     <string name="toast_cache_cleared">キャッシュをクリアしました</string>
     <string name="toast_no_source">まずソースを追加してください</string>
     <string name="toast_permission_denied">権限が拒否されました：%1$s</string>
+    <string name="toast_nearby_permission_denied">SMB ソースへの接続には「付近のデバイス」権限が必要です</string>
     <string name="toast_already_scanning">既にスキャン中です</string>
     <string name="toast_scan_failed">スキャン失敗：%1$s</string>
     <string name="toast_load_failed">読み込み失敗：%1$s</string>

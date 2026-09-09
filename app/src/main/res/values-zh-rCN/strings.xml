@@ -170,6 +170,7 @@
     <string name="toast_cache_cleared">缓存已清理</string>
     <string name="toast_no_source">请先添加文件源</string>
     <string name="toast_permission_denied">权限被拒绝：%1$s</string>
+    <string name="toast_nearby_permission_denied">连接 SMB 源需要「附近的设备」权限</string>
     <string name="toast_already_scanning">正在扫描中</string>
     <string name="toast_scan_failed">扫描失败：%1$s</string>
     <string name="toast_load_failed">加载失败：%1$s</string>

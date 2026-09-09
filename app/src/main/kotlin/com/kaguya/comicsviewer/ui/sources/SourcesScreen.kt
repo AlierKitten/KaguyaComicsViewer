@@ -70,6 +70,7 @@ import androidx.navigation.NavController
 import com.kaguya.comicsviewer.data.source.smb.SmbClient
 import com.kaguya.comicsviewer.domain.model.ComicSource
 import com.kaguya.comicsviewer.domain.model.ComicSourceType
+import com.kaguya.comicsviewer.util.NearbyDevicePermission
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,6 +111,17 @@ fun SourcesScreen(
         }
     }
 
+    // SMB 走局域网，需要「附近的设备」权限；首次启动已申请，这里作为被拒后的补救入口
+    val nearbyPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result.values.all { it } && NearbyDevicePermission.isGranted(context)) {
+            showSmb = true
+        } else {
+            Toast.makeText(context, context.getString(R.string.toast_nearby_permission_denied), Toast.LENGTH_LONG).show()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -146,7 +158,13 @@ fun SourcesScreen(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 )
                 ExtendedFloatingActionButton(
-                    onClick = { showSmb = true },
+                    onClick = {
+                        if (NearbyDevicePermission.isGranted(context)) {
+                            showSmb = true
+                        } else {
+                            nearbyPermissionLauncher.launch(NearbyDevicePermission.requiredPermissions())
+                        }
+                    },
                     text = { Text(stringResource(R.string.source_type_smb)) },
                     icon = { Icon(Icons.Outlined.Cloud, null) }
                 )

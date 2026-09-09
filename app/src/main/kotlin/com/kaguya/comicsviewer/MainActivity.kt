@@ -28,6 +28,7 @@ import com.kaguya.comicsviewer.ui.theme.KaguyaTheme
 import com.kaguya.comicsviewer.ui.theme.LocalSpacing
 import com.kaguya.comicsviewer.ui.theme.Spacing
 import com.kaguya.comicsviewer.util.LocaleHelper
+import com.kaguya.comicsviewer.util.NearbyDevicePermission
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -37,14 +38,19 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var settingsRepository: SettingsRepository
 
+    private companion object {
+        const val PREFS_STARTUP = "startup_permissions"
+        const val KEY_NEARBY_PERMISSION_REQUESTED = "nearby_permission_requested"
+    }
+
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(LocaleHelper.applyLocale(newBase, LocaleHelper.readStoredLanguage()))
     }
 
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        Log.d("MainActivity", "Notification permission: $granted")
+    private val startupPermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        Log.d("MainActivity", "Startup permissions: $result")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,14 +59,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Android 13+ 首次启动时请求通知权限
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
+        requestStartupPermissions()
 
         Log.d("MainActivity", "setting content")
 
@@ -95,6 +94,34 @@ class MainActivity : ComponentActivity() {
             }
         }
         Log.d("MainActivity", "onCreate done")
+    }
+
+    /**
+     * 启动时的权限申请：
+     * - Android 13+ 通知权限：未授予时申请（下载/索引进度通知依赖它）；
+     * - 「附近的设备」权限（NEARBY_WIFI_DEVICES / ACCESS_LOCAL_NETWORK）：仅在首次启动申请一次，
+     *   缺少时系统会屏蔽局域网连接，SMB 源将不可用；被拒后可在「添加 SMB 源」时再次触发申请。
+     */
+    private fun requestStartupPermissions() {
+        val pending = LinkedHashSet<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            pending.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val prefs = getSharedPreferences(PREFS_STARTUP, MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_NEARBY_PERMISSION_REQUESTED, false) &&
+            !NearbyDevicePermission.isGranted(this)
+        ) {
+            pending.addAll(NearbyDevicePermission.requiredPermissions())
+            prefs.edit().putBoolean(KEY_NEARBY_PERMISSION_REQUESTED, true).apply()
+        }
+
+        if (pending.isNotEmpty()) {
+            startupPermissionsLauncher.launch(pending.toTypedArray())
+        }
     }
 
     /** 应用/取消「隐藏最近任务预览图」：FLAG_SECURE 禁止截图；API33+ setRecentsScreenshotEnabled 隐藏最近任务缩略图（应用仍保留在最近任务中）。 */

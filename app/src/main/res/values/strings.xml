@@ -172,6 +172,7 @@
     <string name="toast_cache_cleared">Cache cleared</string>
     <string name="toast_no_source">Add a source first</string>
     <string name="toast_permission_denied">Permission denied: %1$s</string>
+    <string name="toast_nearby_permission_denied">Nearby devices permission is required to connect to SMB sources</string>
     <string name="toast_already_scanning">Already scanning</string>
     <string name="toast_scan_failed">Scan failed: %1$s</string>
     <string name="toast_load_failed">Load failed: %1$s</string>
